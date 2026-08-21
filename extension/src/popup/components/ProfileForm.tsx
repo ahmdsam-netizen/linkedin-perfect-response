@@ -14,13 +14,65 @@ export function ProfileForm() {
     const [skillInput, setSkillInput] = useState("");
     const [saved, setSaved] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [syncing, setSyncing] = useState(false);
+    const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
     useEffect(() => {
-        getUserProfile().then((stored) => {
-            if (stored) setProfile(stored);
-            setLoading(false);
-        });
+        loadProfile();
     }, []);
+
+    async function loadProfile() {
+        const stored = await getUserProfile();
+        if (stored) {
+            setProfile({
+                ...getDefaultUserProfile(),
+                ...stored,
+                skills: Array.isArray(stored.skills) ? stored.skills : [],
+            });
+        }
+        setLoading(false);
+    }
+
+    async function handleSyncFromLinkedIn() {
+        setSyncing(true);
+        setSyncMessage(null);
+
+        try {
+            // Find active tab
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const activeTab = tabs[0];
+
+            if (!activeTab?.id || !activeTab.url?.includes("linkedin.com")) {
+                setSyncMessage("⚠️ Please open a LinkedIn tab first!");
+                setSyncing(false);
+                return;
+            }
+
+            // Send extraction request to content script in the active tab
+            const response = await chrome.tabs.sendMessage(activeTab.id, {
+                type: "EXTRACT_PAGE_PROFILE",
+            });
+
+            const payload = response?.payload;
+            if (payload) {
+                // Reload profile from storage
+                await loadProfile();
+                const skillCount = Array.isArray(payload.skills) ? payload.skills.length : 0;
+                setSyncMessage(
+                    `✨ Successfully synced! (${skillCount} skills detected, Name="${payload.name || "synced"}")`
+                );
+            } else {
+                setSyncMessage("ℹ️ Tip: Visit your LinkedIn profile page (e.g. /in/your-name) for full details including skills & background!");
+            }
+        } catch (err) {
+            console.error("Sync error:", err);
+            setSyncMessage("ℹ️ Tip: Open your LinkedIn profile page and try syncing again!");
+        } finally {
+            setSyncing(false);
+            setTimeout(() => setSyncMessage(null), 6000);
+        }
+    }
+
 
     function handleChange(field: keyof UserProfile, value: UserProfile[typeof field]) {
         setProfile((prev) => ({ ...prev, [field]: value }));
@@ -57,6 +109,24 @@ export function ProfileForm() {
 
     return (
         <div className="profile-form">
+            <div className="sync-banner">
+                <div className="sync-banner-header">
+                    <span className="sync-badge">⚡ Auto-Sync Active</span>
+                    <button
+                        type="button"
+                        className="btn-sync"
+                        onClick={handleSyncFromLinkedIn}
+                        disabled={syncing}
+                    >
+                        {syncing ? "🔄 Syncing..." : "🔄 Sync from Page"}
+                    </button>
+                </div>
+                <p className="sync-tip">
+                    Extension auto-detects your name, headline, skills & about when you browse LinkedIn or visit your profile!
+                </p>
+                {syncMessage && <div className="sync-status-msg">{syncMessage}</div>}
+            </div>
+
             <div className="form-group">
                 <label htmlFor="name">Your Name</label>
                 <input

@@ -10,15 +10,16 @@ import { SELECTORS } from "./selectors.ts";
 /**
  * Extract all messages from the active LinkedIn conversation.
  */
-export function extractConversation(): Message[] {
-    const messageList = document.querySelector(SELECTORS.messageList);
+export function extractConversation(scope?: Element | null): Message[] {
+    const root = findConversationRoot(scope);
+    const messageList = root.querySelector(SELECTORS.messageList) || root;
     if (!messageList) return [];
 
     const messages: Message[] = [];
 
     // LinkedIn groups messages by sender. Each group contains one or more bubbles.
     // Structure: .msg-s-event-listitem (group) > .msg-s-message-group__name + .msg-s-message-group__message[]
-    const groups = messageList.querySelectorAll(".msg-s-event-listitem");
+    const groups = messageList.querySelectorAll(SELECTORS.messageItem);
 
     groups.forEach((group) => {
         const senderNameEl = group.querySelector(".msg-s-message-group__name");
@@ -42,6 +43,14 @@ export function extractConversation(): Message[] {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function findConversationRoot(scope?: Element | null): Element | Document {
+    if (scope) {
+        const container = scope.closest(".msg-convo-wrapper, .msg-s-message-list-container, .msg-overlay-conversation-bubble, .msg-thread");
+        if (container) return container;
+    }
+    return document;
+}
 
 /**
  * Determine if a message group belongs to the current user or the recipient.

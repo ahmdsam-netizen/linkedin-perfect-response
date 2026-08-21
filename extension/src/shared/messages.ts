@@ -15,6 +15,10 @@ export type ContentToBackgroundMessage =
       }
     | {
           type: "GET_USER_PROFILE";
+      }
+    | {
+          type: "SYNC_USER_PROFILE";
+          payload: Partial<UserProfile>;
       };
 
 // Inbound (background -> content)
@@ -33,8 +37,24 @@ export type BackgroundToContentMessage =
           payload: UserProfile | null;
       };
 
-// Union (either direction)
+// Popup <-> Content messaging
+
+export type PopupToContentMessage =
+    | {
+          type: "EXTRACT_PAGE_PROFILE";
+      };
+
+export type ContentToPopupMessage =
+    | {
+          type: "PAGE_PROFILE_EXTRACTED";
+          payload: Partial<UserProfile> | null;
+      };
+
+// Union (all directions)
 
 export type ExtensionMessage =
     | ContentToBackgroundMessage
-    | BackgroundToContentMessage;
+    | BackgroundToContentMessage
+    | PopupToContentMessage
+    | ContentToPopupMessage;
+

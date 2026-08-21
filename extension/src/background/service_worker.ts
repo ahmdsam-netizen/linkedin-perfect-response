@@ -25,15 +25,25 @@ chrome.runtime.onMessage.addListener(
         sendResponse: (response: BackgroundToContentMessage) => void
     ) => {
         if (message.type === "GENERATE_REPLY") {
-            // Must return true to keep the message channel open for async response
-            handleGenerateReply(message.payload).then(sendResponse);
+            handleGenerateReply(message.payload)
+                .then(sendResponse)
+                .catch((err) => {
+                    sendResponse({
+                        type: "REPLY_ERROR",
+                        error: err instanceof Error ? err.message : String(err),
+                    });
+                });
             return true;
         }
 
         if (message.type === "GET_USER_PROFILE") {
-            getUserProfile().then((profile) => {
-                sendResponse({ type: "USER_PROFILE_RESULT", payload: profile });
-            });
+            getUserProfile()
+                .then((profile) => {
+                    sendResponse({ type: "USER_PROFILE_RESULT", payload: profile });
+                })
+                .catch(() => {
+                    sendResponse({ type: "USER_PROFILE_RESULT", payload: null });
+                });
             return true;
         }
 
@@ -47,13 +57,16 @@ async function handleGenerateReply(
     context: ConversationContext
 ): Promise<BackgroundToContentMessage> {
     try {
-        const userProfile = await getUserProfile();
+        let userProfile = await getUserProfile();
 
+        // If no user profile configured, use a sensible default instead of failing
         if (!userProfile || !userProfile.name) {
-            return {
-                type: "REPLY_ERROR",
-                error:
-                    "No user profile configured. Please open the extension popup and fill in your profile first.",
+            userProfile = {
+                name: "LinkedIn User",
+                role: "Professional",
+                skills: [],
+                background: "",
+                style: "professional",
             };
         }
 

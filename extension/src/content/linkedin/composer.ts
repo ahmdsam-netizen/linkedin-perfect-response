@@ -11,8 +11,8 @@ import { SELECTORS } from "./selectors.ts";
  * Focuses the composer and triggers React's synthetic events so LinkedIn
  * enables the Send button.
  */
-export function insertReplyIntoComposer(text: string): boolean {
-    const composer = document.querySelector<HTMLElement>(SELECTORS.composer);
+export function insertReplyIntoComposer(text: string, scope?: Element | null): boolean {
+    const composer = findComposerElement(scope);
     if (!composer) {
         console.warn("[LinkedIn AI] Composer element not found");
         return false;
@@ -26,7 +26,11 @@ export function insertReplyIntoComposer(text: string): boolean {
 
     // Use execCommand to insert text so LinkedIn's listeners fire
     // (setting textContent directly doesn't trigger React/LinkedIn events)
-    document.execCommand("insertText", false, text);
+    try {
+        document.execCommand("insertText", false, text);
+    } catch {
+        // Fallback for newer browser restrictions
+    }
 
     // Fallback: if execCommand didn't work, set directly and dispatch events
     if (!composer.textContent?.includes(text)) {
@@ -42,10 +46,27 @@ export function insertReplyIntoComposer(text: string): boolean {
 }
 
 /**
- * Check if the composer is currently available on the page.
+ * Check if a composer is currently available in the document or scope.
  */
-export function isComposerAvailable(): boolean {
-    return document.querySelector(SELECTORS.composer) !== null;
+export function isComposerAvailable(scope?: Element | null): boolean {
+    return findComposerElement(scope) !== null;
+}
+
+/**
+ * Helper to locate composer inside a given scope or globally.
+ */
+export function findComposerElement(scope?: Element | null): HTMLElement | null {
+    if (scope) {
+        const localComposer = scope.querySelector<HTMLElement>(SELECTORS.composer);
+        if (localComposer) return localComposer;
+
+        // Search closest form or conversation container
+        const form = scope.closest("form, .msg-form, .msg-convo-wrapper, .msg-overlay-conversation-bubble");
+        const formComposer = form?.querySelector<HTMLElement>(SELECTORS.composer);
+        if (formComposer) return formComposer;
+    }
+
+    return document.querySelector<HTMLElement>(SELECTORS.composer);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

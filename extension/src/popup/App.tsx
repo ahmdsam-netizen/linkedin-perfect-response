@@ -36,7 +36,7 @@ export default function App() {
                     onClick={() => setActiveTab("settings")}
                     type="button"
                 >
-                    Settings
+                    Cached Profiles
                 </button>
             </nav>
 

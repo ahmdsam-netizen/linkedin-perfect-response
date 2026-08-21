@@ -11,6 +11,9 @@ export interface LinkedInPerson {
     company?: string;
     position?: string;
     profileUrl?: string;
+    about?: string;
+    skills?: string[];
+    recentPosts?: string[];
 }
 
 export interface Message {

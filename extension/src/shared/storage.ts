@@ -20,7 +20,37 @@ export async function saveUserProfile(profile: UserProfile): Promise<void> {
 
 export async function getUserProfile(): Promise<UserProfile | null> {
     const result = await chrome.storage.local.get(STORAGE_KEYS.USER_PROFILE);
-    return (result[STORAGE_KEYS.USER_PROFILE] as UserProfile) ?? null;
+    const profile = result[STORAGE_KEYS.USER_PROFILE] as UserProfile | undefined;
+    if (!profile) return null;
+    return {
+        ...getDefaultUserProfile(),
+        ...profile,
+        skills: Array.isArray(profile.skills)
+            ? profile.skills.map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean)
+            : [],
+    };
+}
+
+export async function mergeUserProfile(partial: Partial<UserProfile>): Promise<UserProfile> {
+    const current = (await getUserProfile()) ?? getDefaultUserProfile();
+
+    // Deduplicate and combine skills
+    const existingSkills = Array.isArray(current.skills) ? current.skills : [];
+    const newSkills = Array.isArray(partial.skills) ? partial.skills : [];
+    const mergedSkills = Array.from(
+        new Set([...existingSkills, ...newSkills].map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean))
+    );
+
+    const updated: UserProfile = {
+        name: (partial.name && partial.name.trim()) ? partial.name.trim() : current.name,
+        role: (partial.role && partial.role.trim()) ? partial.role.trim() : current.role,
+        skills: mergedSkills,
+        background: (partial.background && partial.background.trim()) ? partial.background.trim() : current.background,
+        style: partial.style || current.style || "professional",
+    };
+
+    await saveUserProfile(updated);
+    return updated;
 }
 
 export async function clearUserProfile(): Promise<void> {
@@ -38,3 +68,4 @@ export function getDefaultUserProfile(): UserProfile {
         style: "professional",
     };
 }
+

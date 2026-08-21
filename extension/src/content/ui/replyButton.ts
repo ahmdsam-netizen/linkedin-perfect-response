@@ -1,104 +1,158 @@
 /**
  * content/ui/replyButton.ts
- * Inject the 'Generate Reply' button into the LinkedIn composer area.
- * Handles click -> message -> reply insertion workflow.
+ * Injects the '✨ Generate Reply' button into every active LinkedIn message composer
+ * (supporting both full-page messaging and floating chat bubbles).
  */
 
 import { extractRecipient } from "../linkedin/profile.ts";
 import { extractConversation } from "../linkedin/conversation.ts";
-import { insertReplyIntoComposer, isComposerAvailable } from "../linkedin/composer.ts";
+import { insertReplyIntoComposer } from "../linkedin/composer.ts";
+import { SELECTORS } from "../linkedin/selectors.ts";
 import type { BackgroundToContentMessage, ContentToBackgroundMessage } from "../../shared/messages.ts";
 import type { ConversationContext } from "../../shared/types.ts";
 
-const BUTTON_ID = "linkedin-ai-reply-btn";
-const BUTTON_CONTAINER_ID = "linkedin-ai-reply-container";
+const BUTTON_CLASS = "linkedin-ai-reply-btn";
+const CONTAINER_CLASS = "linkedin-ai-reply-container";
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Inject the Generate Reply button into the LinkedIn composer footer.
- * Safe to call multiple times — will not inject duplicates.
+ * Injects Generate Reply buttons into all message composers on the page.
+ * Safe to call repeatedly — will never inject duplicates.
  */
 export function injectReplyButton(): void {
-    if (document.getElementById(BUTTON_CONTAINER_ID)) return;
-    if (!isComposerAvailable()) return;
+    // Locate all message forms / composers on page (full page + overlay bubbles)
+    const forms = findMessageForms();
 
-    const footer = findComposerFooter();
-    if (!footer) return;
+    forms.forEach((form) => {
+        // Skip if already injected
+        if (form.querySelector(`.${CONTAINER_CLASS}`)) return;
 
-    const container = createButtonContainer();
-    footer.appendChild(container);
+        const targetContainer = findInjectionTarget(form);
+        if (!targetContainer) return;
+
+        const buttonContainer = createButtonContainer(form);
+        
+        // If target is left-actions, prepend or append cleanly
+        targetContainer.appendChild(buttonContainer);
+    });
 }
 
 /**
- * Remove the injected button (e.g. when navigating away).
+ * Remove all injected buttons.
  */
 export function removeReplyButton(): void {
-    document.getElementById(BUTTON_CONTAINER_ID)?.remove();
+    document.querySelectorAll(`.${CONTAINER_CLASS}`).forEach((el) => el.remove());
 }
 
-// ─── DOM Creation ─────────────────────────────────────────────────────────────
+// ─── Target Finders ───────────────────────────────────────────────────────────
 
-function createButtonContainer(): HTMLDivElement {
+function findMessageForms(): HTMLElement[] {
+    const matched = new Set<HTMLElement>();
+
+    // 1. Match explicit form elements
+    document.querySelectorAll<HTMLElement>(SELECTORS.messageForm).forEach((el) => matched.add(el));
+
+    // 2. Match through contenteditable elements if forms weren't matched
+    document.querySelectorAll<HTMLElement>(SELECTORS.composer).forEach((composer) => {
+        const parentForm = composer.closest<HTMLElement>("form, .msg-form, .msg-convo-wrapper, .msg-overlay-conversation-bubble");
+        if (parentForm) {
+            matched.add(parentForm);
+        } else if (composer.parentElement) {
+            matched.add(composer.parentElement);
+        }
+    });
+
+    return Array.from(matched);
+}
+
+function findInjectionTarget(form: HTMLElement): Element | null {
+    // Preferred targets in priority order:
+    return (
+        form.querySelector(".msg-form__left-actions") ??
+        form.querySelector("footer.msg-form__footer") ??
+        form.querySelector(".msg-form__footer") ??
+        form.querySelector(".msg-form__actions") ??
+        form.querySelector(".msg-form__right-actions") ??
+        form.querySelector(".msg-form__send-button")?.parentElement ??
+        form
+    );
+}
+
+// ─── DOM Element Creation ─────────────────────────────────────────────────────
+
+function createButtonContainer(form: HTMLElement): HTMLDivElement {
     const container = document.createElement("div");
-    container.id = BUTTON_CONTAINER_ID;
+    container.className = CONTAINER_CLASS;
     container.style.cssText = [
-        "display: flex",
+        "display: inline-flex",
         "align-items: center",
-        "padding: 6px 8px",
-        "gap: 6px",
+        "margin: 2px 6px",
+        "vertical-align: middle",
+        "z-index: 10",
     ].join("; ");
 
-    const button = createButton();
+    const button = createButton(form);
     container.appendChild(button);
 
     return container;
 }
 
-function createButton(): HTMLButtonElement {
+function createButton(form: HTMLElement): HTMLButtonElement {
     const btn = document.createElement("button");
-    btn.id = BUTTON_ID;
+    btn.className = BUTTON_CLASS;
     btn.type = "button";
     btn.textContent = "✨ Generate Reply";
-    btn.title = "Generate an AI reply based on the conversation";
+    btn.title = "Generate an AI reply based on your profile & this conversation";
 
     applyButtonStyles(btn, "idle");
 
-    btn.addEventListener("click", handleButtonClick);
+    btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleButtonClick(btn, form);
+    });
 
     return btn;
 }
 
 function applyButtonStyles(
     btn: HTMLButtonElement,
-    state: "idle" | "loading" | "error"
+    state: "idle" | "loading" | "error" | "success"
 ): void {
     const baseStyles = [
         "display: inline-flex",
         "align-items: center",
-        "gap: 6px",
-        "padding: 6px 14px",
+        "gap: 5px",
+        "padding: 4px 12px",
         "border-radius: 16px",
-        "font-size: 13px",
+        "font-size: 12px",
         "font-weight: 600",
-        "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         "cursor: pointer",
-        "border: 1.5px solid",
-        "transition: all 0.2s ease",
+        "border: 1.5px solid transparent",
+        "transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
         "white-space: nowrap",
+        "box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08)",
+        "line-height: 18px",
     ];
 
     const stateStyles: Record<string, string[]> = {
         idle: [
-            "background: #0073b1",
+            "background: #0a66c2",
             "color: #ffffff",
-            "border-color: #0073b1",
+            "border-color: #0a66c2",
         ],
         loading: [
             "background: #e8f4fd",
-            "color: #0073b1",
-            "border-color: #0073b1",
-            "cursor: not-allowed",
+            "color: #0a66c2",
+            "border-color: #0a66c2",
+            "cursor: wait",
+        ],
+        success: [
+            "background: #057642",
+            "color: #ffffff",
+            "border-color: #057642",
         ],
         error: [
             "background: #fff0f0",
@@ -112,17 +166,13 @@ function applyButtonStyles(
 
 // ─── Event Handling ───────────────────────────────────────────────────────────
 
-async function handleButtonClick(): Promise<void> {
-    const btn = document.getElementById(BUTTON_ID) as HTMLButtonElement | null;
-    if (!btn) return;
-
-    // Set loading state
+async function handleButtonClick(btn: HTMLButtonElement, form: HTMLElement): Promise<void> {
     btn.disabled = true;
     btn.textContent = "⏳ Generating...";
     applyButtonStyles(btn, "loading");
 
     try {
-        const context = buildConversationContext();
+        const context = await buildConversationContext(form);
 
         const message: ContentToBackgroundMessage = {
             type: "GENERATE_REPLY",
@@ -134,46 +184,57 @@ async function handleButtonClick(): Promise<void> {
             BackgroundToContentMessage
         >(message);
 
-        if (response.type === "REPLY_GENERATED") {
-            insertReplyIntoComposer(response.payload.text);
-            btn.textContent = "✅ Reply inserted";
-            applyButtonStyles(btn, "idle");
+        if (!response) {
+            throw new Error("Extension background service worker did not respond. Please refresh the page.");
+        }
 
-            // Reset after 2 seconds
+        if (response.type === "REPLY_GENERATED") {
+            insertReplyIntoComposer(response.payload.text, form);
+            btn.textContent = "✅ Reply inserted";
+            btn.title = "Generated reply inserted successfully!";
+            applyButtonStyles(btn, "success");
+
             setTimeout(() => {
                 btn.textContent = "✨ Generate Reply";
+                btn.title = "Generate an AI reply based on your profile & this conversation";
+                applyButtonStyles(btn, "idle");
                 btn.disabled = false;
-            }, 2000);
+            }, 2500);
         } else if (response.type === "REPLY_ERROR") {
-            btn.textContent = "❌ Error — try again";
+            const errStr = response.error || "Unknown backend error";
+            btn.textContent = "❌ Error";
+            btn.title = `Error: ${errStr}`;
             applyButtonStyles(btn, "error");
             btn.disabled = false;
-            console.error("[LinkedIn AI] Reply error:", response.error);
+            console.error("[LinkedIn AI] Generation error:", errStr);
+
+            setTimeout(() => {
+                btn.textContent = "✨ Generate Reply";
+                btn.title = "Generate an AI reply based on your profile & this conversation";
+                applyButtonStyles(btn, "idle");
+            }, 4000);
         }
     } catch (err) {
-        btn.textContent = "❌ Error — try again";
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        btn.textContent = "❌ Error";
+        btn.title = `Error: ${errorMsg}`;
         applyButtonStyles(btn, "error");
         btn.disabled = false;
-        console.error("[LinkedIn AI] Unexpected error:", err);
+        console.error("[LinkedIn AI] Unexpected error:", errorMsg);
+
+        setTimeout(() => {
+            btn.textContent = "✨ Generate Reply";
+            btn.title = "Generate an AI reply based on your profile & this conversation";
+            applyButtonStyles(btn, "idle");
+        }, 4000);
     }
 }
 
 // ─── Context Building ─────────────────────────────────────────────────────────
 
-function buildConversationContext(): ConversationContext {
-    const recipient = extractRecipient();
-    const messages = extractConversation();
+async function buildConversationContext(form: HTMLElement): Promise<ConversationContext> {
+    const recipient = await extractRecipient(form);
+    const messages = extractConversation(form);
 
     return { recipient, messages };
-}
-
-// ─── Footer Detection ─────────────────────────────────────────────────────────
-
-function findComposerFooter(): Element | null {
-    return (
-        document.querySelector(".msg-form__footer") ??
-        document.querySelector(".msg-form__left-actions") ??
-        document.querySelector(".msg-form__send-button")?.parentElement ??
-        null
-    );
 }
