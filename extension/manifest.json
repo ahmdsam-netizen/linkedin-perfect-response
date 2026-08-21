@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn AI Reply",
+  "version": "0.1.0",
+  "description": "AI-powered contextual LinkedIn replies",
+
+  "permissions": [
+    "storage"
+  ],
+
+  "host_permissions": [
+    "https://www.linkedin.com/*"
+  ],
+
+  "background": {
+    "service_worker": "src/background/service_worker.ts",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.linkedin.com/*"
+      ],
+      "js": [
+        "src/content/content.ts"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "action": {
+    "default_title": "LinkedIn AI Reply",
+    "default_popup": "index.html"
+  }
+}

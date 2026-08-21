@@ -1,0 +1,54 @@
+/* popup/index.css — base reset for the extension popup */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --li-blue: #0073b1;
+    --li-blue-dark: #005f94;
+    --li-blue-light: #e8f4fd;
+    --li-green: #057642;
+    --text-primary: #1d1d1d;
+    --text-secondary: #666;
+    --text-muted: #999;
+    --border: #e0e0e0;
+    --border-focus: #0073b1;
+    --bg: #ffffff;
+    --bg-subtle: #f9f9f9;
+    --bg-hover: #f3f3f3;
+    --radius: 6px;
+    --radius-sm: 4px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    background: var(--bg);
+}
+
+body {
+    width: 360px;
+    min-height: 480px;
+    max-height: 600px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+#root {
+    width: 100%;
+    min-height: 100%;
+}
+
+input, textarea, select, button {
+    font-family: inherit;
+    font-size: inherit;
+}
+
+button {
+    cursor: pointer;
+}
