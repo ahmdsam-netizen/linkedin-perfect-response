@@ -10,33 +10,34 @@ import { SELECTORS } from "./selectors.ts";
 /**
  * Extract all messages from the active LinkedIn conversation.
  */
-export function extractConversation(scope?: Element | null): Message[] {
+export function extractConversation(scope?: Element | null, myName?: string, recipientName?: string): Message[] {
     const root = findConversationRoot(scope);
     const messageList = root.querySelector(SELECTORS.messageList) || root;
     if (!messageList) return [];
 
     const messages: Message[] = [];
+    const seenMessageKeys = new Set<string>();
 
-    // LinkedIn groups messages by sender. Each group contains one or more bubbles.
-    // Structure: .msg-s-event-listitem (group) > .msg-s-message-group__name + .msg-s-message-group__message[]
-    const groups = messageList.querySelectorAll(SELECTORS.messageItem);
+    // Target individual message body elements directly
+    const bodyElements = Array.from(
+        messageList.querySelectorAll<HTMLElement>(
+            "p.msg-s-event-listitem__body, .msg-s-event-listitem__body"
+        )
+    );
 
-    groups.forEach((group) => {
-        const senderNameEl = group.querySelector(".msg-s-message-group__name");
-        const senderName = senderNameEl?.textContent?.trim() ?? "";
+    bodyElements.forEach((bodyEl) => {
+        const text = extractCleanText(bodyEl);
+        if (!text) return;
 
-        // Determine if this group is "me" or "them"
-        const sender = determineSender(group, senderName);
+        const groupEl = bodyEl.closest(".msg-s-event-listitem, .msg-s-message-list__event, .msg-s-message-group") || bodyEl;
+        const sender = determineSender(bodyEl, groupEl, myName, recipientName);
+        const timestamp = extractTimestamp(groupEl);
 
-        // Each message bubble within the group
-        const bubbles = group.querySelectorAll(".msg-s-event-listitem__body");
-        bubbles.forEach((bubble) => {
-            const text = extractBubbleText(bubble);
-            if (text) {
-                const timestamp = extractTimestamp(group);
-                messages.push({ sender, text, timestamp });
-            }
-        });
+        const key = `${sender}::${text}::${timestamp || ""}`;
+        if (!seenMessageKeys.has(key)) {
+            seenMessageKeys.add(key);
+            messages.push({ sender, text, timestamp });
+        }
     });
 
     return messages;
@@ -46,47 +47,102 @@ export function extractConversation(scope?: Element | null): Message[] {
 
 function findConversationRoot(scope?: Element | null): Element | Document {
     if (scope) {
-        const container = scope.closest(".msg-convo-wrapper, .msg-s-message-list-container, .msg-overlay-conversation-bubble, .msg-thread");
+        const container = scope.closest(".msg-convo-wrapper, .msg-s-message-list-container, .msg-overlay-conversation-bubble, .msg-thread, div[data-view-name*='message']");
         if (container) return container;
     }
-    return document;
+    return document.querySelector(".msg-thread, .msg-convo-wrapper, .msg-s-message-list-container, .msg-overlay-conversation-bubble") || document;
 }
 
 /**
- * Determine if a message group belongs to the current user or the recipient.
- * LinkedIn marks self messages with a specific CSS class.
+ * Determine if a message belongs to the current user ("me") or the recipient ("them").
  */
 function determineSender(
+    bodyEl: HTMLElement,
     groupEl: Element,
-    _senderName: string
+    myName?: string,
+    recipientName?: string
 ): "me" | "them" {
-    // LinkedIn adds a modifier class to the user's own messages
-    if (
-        groupEl.classList.contains("msg-s-message-list__event--self") ||
-        groupEl.querySelector(".msg-s-event-listitem--self")
-    ) {
-        return "me";
+    // 1. Look for the sender name in the message group or event item
+    const messageGroup = bodyEl.closest(".msg-s-message-group, .msg-s-event-listitem, .msg-s-message-list__event") || groupEl;
+    const senderNameEl =
+        messageGroup.querySelector(".msg-s-message-group__name, .msg-s-event-listitem__name, .msg-s-message-group__profile-link, [class*='message-group__name']") ||
+        messageGroup.closest(".msg-s-message-group")?.querySelector(".msg-s-message-group__name, [class*='message-group__name']");
+
+    const senderText = senderNameEl?.textContent?.trim() || "";
+    if (senderText) {
+        const lower = senderText.toLowerCase();
+
+        if (lower === "you" || lower.includes("(you)")) {
+            return "me";
+        }
+
+        // Compare with provided user name or default "Sayem"
+        const myTokens = (myName || "Sayem Ahmad").toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+        if (myTokens.some((t) => lower.includes(t))) {
+            return "me";
+        }
+
+        // Compare with recipient name
+        const recipTokens = (recipientName || "Abdul Rub Faheemi").toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+        if (recipTokens.some((t) => lower.includes(t))) {
+            return "them";
+        }
     }
+
+    // 2. Check self modifier classes on the body, group, or parent list items
+    const isSelfContainer =
+        bodyEl.closest(".msg-s-message-list__event--self, .msg-s-event-listitem--self, .msg-s-message-group--self, [class*='--self']") !== null ||
+        groupEl.classList.contains("msg-s-message-list__event--self") ||
+        groupEl.classList.contains("msg-s-event-listitem--self") ||
+        groupEl.classList.contains("msg-s-message-group--self");
+
+    if (isSelfContainer) return "me";
+
+    // 3. Check for explicit "other" modifier classes
+    const isOtherContainer =
+        bodyEl.closest(".msg-s-message-list__event--other, .msg-s-event-listitem--other, .msg-s-message-group--other, [class*='--other']") !== null ||
+        groupEl.classList.contains("msg-s-message-list__event--other") ||
+        groupEl.classList.contains("msg-s-event-listitem--other");
+
+    if (isOtherContainer) return "them";
+
+    // 4. Check avatar link
+    const avatarLink = groupEl.querySelector<HTMLAnchorElement>("a.msg-s-event-listitem__link, a.msg-s-message-group__profile-link");
+    if (avatarLink?.href) {
+        if (avatarLink.href.includes("/in/me") || (myName && avatarLink.href.includes(myName.toLowerCase().split(" ")[0]))) {
+            return "me";
+        }
+    }
+
     return "them";
 }
 
 /**
- * Extract plain text from a message bubble, stripping HTML.
+ * Extract clean plain text from a message body, stripping reaction bars, hover menus, and icons.
  */
-function extractBubbleText(bubble: Element): string {
-    // Clone to manipulate without affecting the page
+function extractCleanText(bubble: Element): string {
     const clone = bubble.cloneNode(true) as Element;
 
-    // Remove any reaction emoji spans
-    clone.querySelectorAll(".msg-s-event-listitem__reaction-bar").forEach((el) => el.remove());
+    // Remove any reaction emojis, action toolbars, timestamps, buttons, svgs
+    clone.querySelectorAll(
+        ".msg-reactions-v2, .msg-s-event-listitem__reaction-bar, .msg-s-reactions, .reactions-menu, .artdeco-hoverable-content, .msg-s-event-listitem__hover-actions, .msg-s-message-group__timestamp, time, .msg-s-event-listitem__options, button, svg"
+    ).forEach((el) => el.remove());
 
-    return clone.textContent?.trim() ?? "";
+    let raw = clone.textContent || "";
+
+    // Strip common reaction emoji sequences (e.g. "👏 👍 😊 ❤️ 💡 🎉")
+    raw = raw.replace(/^[\s\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}]+/gu, "");
+
+    return raw
+        .replace(/[\n\r\t]+/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
 }
 
 /**
  * Try to extract a timestamp string from the group element.
  */
 function extractTimestamp(groupEl: Element): string | undefined {
-    const timeEl = groupEl.querySelector("time, .msg-s-message-group__timestamp");
+    const timeEl = groupEl.querySelector("time, .msg-s-message-group__timestamp, .msg-s-event-listitem__time-stamp");
     return timeEl?.textContent?.trim() ?? undefined;
 }

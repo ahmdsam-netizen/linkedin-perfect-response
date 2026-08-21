@@ -4,14 +4,23 @@
  * All extension communication MUST use these types - no raw strings.
  */
 
-import type { ConversationContext, GeneratedReply, UserProfile } from "./types.ts";
+import type { CommunicationStyle, ConversationContext, GeneratedReply, UserProfile } from "./types.ts";
 
-// Outbound (content -> background)
+export interface GenerateReplyPayload {
+    context: ConversationContext;
+    myName?: string;
+    recipientName?: string;
+    relationship?: string;
+    style?: CommunicationStyle;
+    userPrompt?: string;
+}
+
+// Outbound (content/popup -> background)
 
 export type ContentToBackgroundMessage =
     | {
           type: "GENERATE_REPLY";
-          payload: ConversationContext;
+          payload: GenerateReplyPayload;
       }
     | {
           type: "GET_USER_PROFILE";
@@ -19,9 +28,15 @@ export type ContentToBackgroundMessage =
     | {
           type: "SYNC_USER_PROFILE";
           payload: Partial<UserProfile>;
+      }
+    | {
+          type: "FETCH_OWN_PROFILE_BACKGROUND";
+      }
+    | {
+          type: "OPEN_POPUP";
       };
 
-// Inbound (background -> content)
+// Inbound (background -> content/popup)
 
 export type BackgroundToContentMessage =
     | {
@@ -42,12 +57,27 @@ export type BackgroundToContentMessage =
 export type PopupToContentMessage =
     | {
           type: "EXTRACT_PAGE_PROFILE";
+      }
+    | {
+          type: "EXTRACT_ACTIVE_CONVERSATION";
+      }
+    | {
+          type: "INSERT_REPLY_TEXT";
+          payload: { text: string };
       };
 
 export type ContentToPopupMessage =
     | {
           type: "PAGE_PROFILE_EXTRACTED";
           payload: Partial<UserProfile> | null;
+      }
+    | {
+          type: "CONVERSATION_EXTRACTED";
+          payload: ConversationContext | null;
+      }
+    | {
+          type: "REPLY_INSERTED";
+          success: boolean;
       };
 
 // Union (all directions)

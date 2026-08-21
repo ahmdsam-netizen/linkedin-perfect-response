@@ -1,18 +1,18 @@
 /**
  * popup/App.tsx
- * Extension popup shell with tab navigation.
- * Profile tab | Settings tab
+ * Extension popup shell with tab navigation:
+ * Generate Reply tab (primary) | Your Profile tab
  */
 
 import { useState } from "react";
 import "./App.css";
+import { ReplyGenerator } from "./components/ReplyGenerator.tsx";
 import { ProfileForm } from "./components/ProfileForm.tsx";
-import { Settings } from "./components/Settings.tsx";
 
-type Tab = "profile" | "settings";
+type Tab = "reply" | "profile";
 
 export default function App() {
-    const [activeTab, setActiveTab] = useState<Tab>("profile");
+    const [activeTab, setActiveTab] = useState<Tab>("reply");
 
     return (
         <div className="popup-root">
@@ -25,24 +25,24 @@ export default function App() {
 
             <nav className="popup-tabs">
                 <button
+                    className={["tab-btn", activeTab === "reply" ? "active" : ""].join(" ")}
+                    onClick={() => setActiveTab("reply")}
+                    type="button"
+                >
+                    ✨ Generate Reply
+                </button>
+                <button
                     className={["tab-btn", activeTab === "profile" ? "active" : ""].join(" ")}
                     onClick={() => setActiveTab("profile")}
                     type="button"
                 >
-                    Your Profile
-                </button>
-                <button
-                    className={["tab-btn", activeTab === "settings" ? "active" : ""].join(" ")}
-                    onClick={() => setActiveTab("settings")}
-                    type="button"
-                >
-                    Cached Profiles
+                    👤 Your Profile
                 </button>
             </nav>
 
             <main className="popup-content">
+                {activeTab === "reply" && <ReplyGenerator />}
                 {activeTab === "profile" && <ProfileForm />}
-                {activeTab === "settings" && <Settings />}
             </main>
         </div>
     );

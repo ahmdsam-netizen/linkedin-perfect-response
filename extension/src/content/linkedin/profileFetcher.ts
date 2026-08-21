@@ -9,60 +9,110 @@
  * Recent Activity in real time.
  */
 
-import type { CachedProfile } from "../../shared/profileCache.ts";
-import {
-    saveProfileToCache,
-    getProfileFromCache,
-    extractSlugFromUrl,
-} from "../../shared/profileCache.ts";
+export interface ExtractedProfileData {
+    slug: string;
+    name: string;
+    headline?: string;
+    about?: string;
+    skills: string[];
+    recentPosts: string[];
+}
+
+export function extractSlugFromUrl(urlOrSlug: string): string | null {
+    if (!urlOrSlug) return null;
+    let clean = urlOrSlug.trim();
+
+    // Remove query params and hash
+    clean = clean.split("?")[0].split("#")[0];
+
+    // If pure slug string like "sayem-ahmad-4abb2b385"
+    if (/^[a-zA-Z0-9_-]{2,}$/.test(clean) && !clean.includes("/") && !clean.includes(".")) {
+        return clean;
+    }
+
+    // Match /in/slug or /in/slug/details/...
+    const match = clean.match(/(?:linkedin\.com)?\/in\/([a-zA-Z0-9%_-]+)/i);
+    if (match && match[1]) {
+        const extracted = decodeURIComponent(match[1]).replace(/\/+$/, "");
+        return extracted.length > 0 ? extracted : null;
+    }
+    return null;
+}
 
 /**
  * Fetches a LinkedIn profile in the background and returns structured data.
- * Checks the local cache first before making a network request.
+ * Concurrently fetches the main profile for about/headline and /details/skills/ for the full skill set.
  */
 export async function fetchProfileInBackground(
     profileUrlOrSlug: string
-): Promise<CachedProfile | null> {
+): Promise<ExtractedProfileData | null> {
     if (!profileUrlOrSlug) return null;
 
-    const slug = extractSlugFromUrl(profileUrlOrSlug);
+    let slug = extractSlugFromUrl(profileUrlOrSlug);
     if (!slug || slug.length < 2) return null;
 
-    // 1. Check local cache first
-    const cached = await getProfileFromCache(slug);
-    if (cached && (cached.about || cached.skills.length > 0)) {
-        console.log(`[LinkedIn AI] ⚡ Serving "${slug}" from cache (${cached.skills.length} skills).`);
-        return cached;
-    }
-
-    // 2. Perform silent background fetch
-    const url = `https://www.linkedin.com/in/${slug}/`;
-    console.log(`[LinkedIn AI] 🚀 Background fetching profile from: ${url}`);
+    const mainUrl = `https://www.linkedin.com/in/${slug}/`;
+    console.log(`[LinkedIn AI] 🚀 Background fetching profile for "${slug}"...`);
 
     try {
-        const response = await fetch(url, {
-            method: "GET",
-            credentials: "include",
-            headers: {
-                Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-        });
+        const fetchHeaders = {
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        };
 
-        if (!response.ok) {
-            console.warn(`[LinkedIn AI] Background fetch failed for ${slug}: HTTP ${response.status}`);
-            return null;
+        const mainResp = await fetch(mainUrl, { method: "GET", credentials: "include", headers: fetchHeaders });
+        if (!mainResp.ok) return null;
+
+        // Check if redirected to public vanity URL (e.g. from ACoA... to abdul-rub-faheemi-aa3b633a6)
+        const finalUrl = mainResp.url || mainUrl;
+        const resolvedSlug = extractSlugFromUrl(finalUrl) || slug;
+
+        const mainHtml = await mainResp.text();
+        const extractedMain = parseProfileHtml(mainHtml, resolvedSlug);
+
+        // Fetch skills page using resolved slug
+        let extractedSkills: ExtractedProfileData | null = null;
+        try {
+            const skillsUrl = `https://www.linkedin.com/in/${resolvedSlug}/details/skills/`;
+            const skillsResp = await fetch(skillsUrl, { method: "GET", credentials: "include", headers: fetchHeaders });
+            if (skillsResp.ok) {
+                const skillsHtml = await skillsResp.text();
+                extractedSkills = parseProfileHtml(skillsHtml, resolvedSlug);
+            }
+        } catch {
+            // Ignore skills sub-fetch error
         }
 
-        const html = await response.text();
-        const extracted = parseProfileHtml(html, slug);
+        // Combine findings from main page and dedicated skills page
+        const combinedSkills = Array.from(
+            new Set([...(extractedMain?.skills || []), ...(extractedSkills?.skills || [])])
+        ).filter(isValidSkill).slice(0, 50);
 
-        if (extracted && (extracted.name || extracted.about || extracted.skills.length > 0)) {
-            await saveProfileToCache(extracted);
+        const combinedPosts = Array.from(
+            new Set([...(extractedMain?.recentPosts || []), ...(extractedSkills?.recentPosts || [])])
+        ).slice(0, 5);
+
+        const finalName = extractedMain?.name && extractedMain.name !== resolvedSlug && !extractedMain.name.startsWith("ACoA")
+            ? extractedMain.name
+            : (extractedSkills?.name && extractedSkills.name !== resolvedSlug && !extractedSkills.name.startsWith("ACoA") ? extractedSkills.name : resolvedSlug);
+
+        const finalHeadline = extractedMain?.headline || extractedSkills?.headline;
+        const finalAbout = extractedMain?.about || extractedSkills?.about;
+
+        if (finalName || finalHeadline || combinedSkills.length > 0 || finalAbout) {
+            const result: ExtractedProfileData = {
+                slug: resolvedSlug,
+                name: finalName,
+                headline: finalHeadline,
+                about: finalAbout,
+                skills: combinedSkills,
+                recentPosts: combinedPosts,
+            };
+
             console.log(
-                `[LinkedIn AI] ✅ Background-fetched "${slug}":`,
-                `Name="${extracted.name}", Headline="${extracted.headline || "none"}", About=${extracted.about ? `"${extracted.about.slice(0, 40)}..."` : "none"}, Skills=${extracted.skills.length} [${extracted.skills.slice(0, 5).join(", ")}], Posts=${extracted.recentPosts.length}`
+                `[LinkedIn AI] ✅ Background-fetched profile for "${resolvedSlug}":`,
+                `Name="${result.name}", Headline="${result.headline || "none"}", About=${result.about ? `"${result.about.slice(0, 40)}..."` : "none"}, Skills=${result.skills.length} [${result.skills.slice(0, 5).join(", ")}]`
             );
-            return extracted;
+            return result;
         }
     } catch (err) {
         console.error(`[LinkedIn AI] Background profile fetch error for ${slug}:`, err);
@@ -72,47 +122,96 @@ export async function fetchProfileInBackground(
 }
 
 /**
- * Directly fetches the logged-in user's own profile in the background via /in/me/.
+ * Directly fetches the logged-in user's own profile in the background.
+ * Queries /in/me/ and /in/me/details/skills/ using active session cookies.
  */
-export async function fetchOwnProfileDirectly(): Promise<CachedProfile | null> {
-    console.log("[LinkedIn AI] 🚀 Auto-syncing your own profile via https://www.linkedin.com/in/me/ ...");
-    try {
-        const response = await fetch("https://www.linkedin.com/in/me/", {
-            method: "GET",
-            credentials: "include",
-            headers: {
-                Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-        });
+export async function fetchOwnProfileDirectly(): Promise<ExtractedProfileData | null> {
+    console.log("[LinkedIn AI] 🚀 Auto-syncing your own profile & skills via /in/me/ and /details/skills/...");
 
-        if (!response.ok) {
-            console.warn("[LinkedIn AI] /in/me/ returned HTTP", response.status);
-            return null;
+    try {
+        const fetchHeaders = {
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        };
+
+        const [meResp, skillsResp] = await Promise.allSettled([
+            fetch("https://www.linkedin.com/in/me/", {
+                method: "GET",
+                credentials: "include",
+                headers: fetchHeaders,
+            }),
+            fetch("https://www.linkedin.com/in/me/details/skills/", {
+                method: "GET",
+                credentials: "include",
+                headers: fetchHeaders,
+            }),
+        ]);
+
+        let extractedMe: ExtractedProfileData | null = null;
+        let extractedSkills: ExtractedProfileData | null = null;
+        let resolvedSlug = "me";
+
+        if (meResp.status === "fulfilled" && meResp.value.ok) {
+            const finalUrl = meResp.value.url || "";
+            resolvedSlug = extractSlugFromUrl(finalUrl) || "me";
+            const meHtml = await meResp.value.text();
+            extractedMe = parseProfileHtml(meHtml, resolvedSlug);
         }
 
-        const finalUrl = response.url || window.location.href;
-        const slug = extractSlugFromUrl(finalUrl) || "me";
-        const html = await response.text();
+        if (skillsResp.status === "fulfilled" && skillsResp.value.ok) {
+            const skillsHtml = await skillsResp.value.text();
+            extractedSkills = parseProfileHtml(skillsHtml, resolvedSlug);
+        }
 
-        const extracted = parseProfileHtml(html, slug);
-        if (extracted && (extracted.name || extracted.about || extracted.skills.length > 0)) {
-            await saveProfileToCache(extracted);
+        const combinedSkills = Array.from(
+            new Set([...(extractedMe?.skills || []), ...(extractedSkills?.skills || [])])
+        ).filter(isValidSkill).slice(0, 50);
+
+        const finalName = extractedMe?.name && extractedMe.name !== "me" && extractedMe.name !== resolvedSlug
+            ? extractedMe.name
+            : (extractedSkills?.name && extractedSkills.name !== "me" ? extractedSkills.name : resolvedSlug);
+
+        const finalHeadline = extractedMe?.headline || extractedSkills?.headline;
+        const finalAbout = extractedMe?.about || extractedSkills?.about;
+
+        if (finalName || finalHeadline || combinedSkills.length > 0 || finalAbout) {
+            const result: ExtractedProfileData = {
+                slug: resolvedSlug,
+                name: finalName,
+                headline: finalHeadline,
+                about: finalAbout,
+                skills: combinedSkills,
+                recentPosts: extractedMe?.recentPosts || [],
+            };
+
             console.log(
-                `[LinkedIn AI] ✅ Auto-synced your own profile (${slug}):`,
-                `Name="${extracted.name}", Role="${extracted.headline}", Skills=${extracted.skills.length} [${extracted.skills.slice(0, 5).join(", ")}]`
+                `[LinkedIn AI] ✅ Auto-synced own profile (${resolvedSlug}):`,
+                `Name="${result.name}", Role="${result.headline || "none"}", Skills=${result.skills.length} [${result.skills.slice(0, 5).join(", ")}]`
             );
-            return extracted;
+            return result;
         }
     } catch (err) {
-        console.error("[LinkedIn AI] Error fetching /in/me/:", err);
+        console.error("[LinkedIn AI] Error fetching /in/me/ profile:", err);
     }
+
+    // Fallback: Check service worker
+    try {
+        const swResponse = await chrome.runtime.sendMessage({
+            type: "FETCH_OWN_PROFILE_BACKGROUND",
+        });
+        if (swResponse?.payload && (swResponse.payload.skills?.length > 0 || swResponse.payload.about)) {
+            return swResponse.payload;
+        }
+    } catch {
+        // Ignore service worker fallback failure
+    }
+
     return null;
 }
 
 /**
  * Parses raw LinkedIn profile HTML using embedded hydration JSON and DOM parsing.
  */
-export function parseProfileHtml(html: string, fallbackSlug: string): CachedProfile | null {
+export function parseProfileHtml(html: string, fallbackSlug: string): ExtractedProfileData | null {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
 
@@ -138,21 +237,26 @@ export function parseProfileHtml(html: string, fallbackSlug: string): CachedProf
     }
 
     const domSkills: string[] = [];
+    // 1. Dedicated skills section if present
     const skillsSection = findSectionByHeading(doc, ["skills", "skills & endorsements", "top skills"]);
-    if (skillsSection) {
-        skillsSection.querySelectorAll("span[aria-hidden='true'], .hoverable-link-text").forEach((el) => {
+    const skillContainers = skillsSection ? [skillsSection] : [doc.body || doc];
+
+    skillContainers.forEach((container) => {
+        container.querySelectorAll(
+            "a[data-field='skill_card_skill_topic'] span[aria-hidden='true'], .hoverable-link-text span[aria-hidden='true'], div[data-view-name*='skill'] span[aria-hidden='true'], .pvs-list__paged-list-item .mr1.hoverable-link-text span[aria-hidden='true'], .pvs-list__paged-list-item div.t-bold span[aria-hidden='true']"
+        ).forEach((el) => {
             const text = cleanText(el.textContent || "");
             if (isValidSkill(text) && !domSkills.includes(text)) {
                 domSkills.push(text);
             }
         });
-    }
+    });
 
     // ─── 3. Combine JSON + DOM results ─────────────────────────────────────────
     const finalName = jsonExtracted.name || (domName !== fallbackSlug ? domName : fallbackSlug);
     const finalHeadline = jsonExtracted.headline || domHeadline;
     const finalAbout = jsonExtracted.about || domAbout;
-    const finalSkills = Array.from(new Set([...(jsonExtracted.skills || []), ...domSkills]));
+    const finalSkills = Array.from(new Set([...(jsonExtracted.skills || []), ...domSkills])).filter(isValidSkill);
     const finalPosts = Array.from(new Set([...(jsonExtracted.recentPosts || [])]));
 
     return {
@@ -162,7 +266,6 @@ export function parseProfileHtml(html: string, fallbackSlug: string): CachedProf
         about: finalAbout,
         skills: finalSkills.slice(0, 50),
         recentPosts: finalPosts.slice(0, 5),
-        cachedAt: Date.now(),
     };
 }
 
@@ -204,7 +307,7 @@ export function extractFromEmbeddedJson(doc: Document, rawHtml?: string): {
         for (let i = 0; i < code.childNodes.length; i++) {
             const node = code.childNodes[i];
             if (node.nodeType === 8 /* Node.COMMENT_NODE */ && node.nodeValue) {
-                let val = node.nodeValue.trim();
+                const val = node.nodeValue.trim();
                 if (val.startsWith("{") && val.endsWith("}")) {
                     addJsonString(val);
                 }
@@ -316,15 +419,25 @@ function inspectJsonObject(
 
     if (
         typeStr.includes("identity.profile.Profile") ||
+        typeStr.includes("MiniProfile") ||
         (record.summary && record.headline) ||
-        (record.firstName && record.lastName)
+        (record.firstName && record.lastName) ||
+        record.headline !== undefined ||
+        record.occupation !== undefined
     ) {
-        const summary = extractText(record.summary);
+        const summary = extractText(record.summary) || extractText(record.about);
         if (summary && !result.about) {
             result.about = cleanAbout(summary);
         }
-        const headline = extractText(record.headline);
-        if (headline && !result.headline) {
+        const headline =
+            extractText(record.headline) ||
+            extractText(record.occupation) ||
+            extractText(record.primarySubtitle) ||
+            extractText(record.secondarySubtitle) ||
+            extractText(record.jobTitle) ||
+            extractText(record.subline);
+
+        if (headline && !result.headline && isValidSkill(headline)) {
             result.headline = cleanText(headline);
         }
         const firstName = extractText(record.firstName);
@@ -336,9 +449,8 @@ function inspectJsonObject(
 
     // ─── 3. LinkedIn Skill Entity ──────────────────────────────────────────────
     const isSkillType =
-        typeStr.includes("Skill") ||
+        (typeStr.includes("Skill") && !typeStr.includes("Component")) ||
         typeStr.includes("StandardizedSkill") ||
-        typeStr.includes("ProfileComponent") ||
         record.skillName !== undefined ||
         record.skillTopic !== undefined;
 
@@ -365,26 +477,19 @@ function inspectJsonObject(
             }
         }
     }
-    if (Array.isArray(record.knowsAbout)) {
-        for (const sk of record.knowsAbout) {
-            const skillStr = extractText(sk);
-            if (skillStr && isValidSkill(skillStr) && !result.skills.includes(skillStr)) {
-                result.skills.push(cleanText(skillStr));
-            }
-        }
-    }
 
     // ─── 5. Post / Activity / Update Entity ────────────────────────────────────
     if (typeStr.includes("Update") || typeStr.includes("Share") || record.commentary) {
         const commentary = record.commentary as Record<string, unknown> | undefined;
-        let postText = extractText(commentary?.text) || extractText(record.text) || extractText(record.commentary);
+        const postText = extractText(commentary?.text) || extractText(record.text) || extractText(record.commentary);
         if (postText && postText.length > 25 && !result.recentPosts.includes(postText)) {
             result.recentPosts.push(cleanText(postText).slice(0, 300));
         }
     }
 
     // ─── 6. Recurse into all object values ─────────────────────────────────────
-    for (const val of Object.values(record)) {
+    for (const [key, val] of Object.entries(record)) {
+        if (key.startsWith("$recipe") || key === "paging" || key === "metadata") continue;
         if (val && typeof val === "object") {
             inspectJsonObject(val, result, visited, depth + 1);
         }
@@ -466,10 +571,33 @@ function cleanAbout(text: string): string {
 export function isValidSkill(text: string): boolean {
     if (!text || typeof text !== "string") return false;
     const clean = text.trim();
-    if (clean.length < 2 || clean.length > 60) return false;
-    const lower = clean.toLowerCase();
+    if (clean.length < 2 || clean.length > 50) return false;
 
-    // Exclude noise, LinkedIn buttons, numbers, and sub-labels
+    // Exclude Java/schema namespaces, internal LinkedIn identifiers, recipes, and noise
+    if (
+        clean.startsWith("com.") ||
+        clean.startsWith("org.") ||
+        clean.startsWith("net.") ||
+        clean.includes("linkedin.") ||
+        clean.includes("voyager.") ||
+        clean.includes("recipe.") ||
+        clean.includes("dash.deco") ||
+        clean.includes("Anon") ||
+        clean.startsWith("urn:li:") ||
+        clean.startsWith("http") ||
+        clean.includes("://") ||
+        clean.includes("/") ||
+        clean.includes("\\") ||
+        clean.includes("{") ||
+        clean.includes("}") ||
+        clean.includes("$") ||
+        /^[a-z0-9_.-]+\.[a-z0-9_.-]+$/i.test(clean) ||
+        /^\d+$/.test(clean)
+    ) {
+        return false;
+    }
+
+    const lower = clean.toLowerCase();
     return !(
         lower.includes("endorsement") ||
         lower.includes("experience across") ||
@@ -480,9 +608,16 @@ export function isValidSkill(text: string): boolean {
         lower.startsWith("badge") ||
         lower.startsWith("skill badge") ||
         lower.includes("skill assessment") ||
-        lower.startsWith("http") ||
-        lower.startsWith("urn:li:") ||
-        /^\d+$/.test(clean)
+        lower === "fullpaging" ||
+        lower === "vectorartifact" ||
+        lower === "locale" ||
+        lower === "industry" ||
+        lower === "date" ||
+        lower === "daterange" ||
+        lower === "minischool" ||
+        lower === "minicompany" ||
+        lower === "coordinate2dfull" ||
+        lower === "vectorimage"
     );
 }
 

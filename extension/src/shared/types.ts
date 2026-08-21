@@ -33,14 +33,18 @@ export type CommunicationStyle =
     | "professional"
     | "casual"
     | "concise"
-    | "detailed";
+    | "detailed"
+    | "friendly"
+    | "persuasive"
+    | "enthusiastic"
+    | string;
 
 export interface UserProfile {
     name: string;
     role: string;
     skills: string[];
     background: string;
-    style: CommunicationStyle;
+    style?: CommunicationStyle;
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -48,6 +52,11 @@ export interface UserProfile {
 export interface GenerateReplyRequest {
     context: ConversationContext;
     userProfile: UserProfile;
+    myName?: string;
+    recipientName?: string;
+    relationship?: string;
+    style?: CommunicationStyle;
+    userPrompt?: string;
 }
 
 export interface GeneratedReply {

@@ -1,4 +1,4 @@
-/* popup/index.css — base reset for the extension popup */
+/* popup/index.css — Frosted Glassmorphism Theme */
 
 *, *::before, *::after {
     box-sizing: border-box;
@@ -7,41 +7,77 @@
 }
 
 :root {
-    --li-blue: #0073b1;
-    --li-blue-dark: #005f94;
-    --li-blue-light: #e8f4fd;
-    --li-green: #057642;
-    --text-primary: #1d1d1d;
-    --text-secondary: #666;
-    --text-muted: #999;
-    --border: #e0e0e0;
-    --border-focus: #0073b1;
-    --bg: #ffffff;
-    --bg-subtle: #f9f9f9;
-    --bg-hover: #f3f3f3;
-    --radius: 6px;
-    --radius-sm: 4px;
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+    /* Frosted Crystal Glass Palette */
+    --glass-bg-body: rgba(255, 255, 255, 0.45);
+    --glass-card: rgba(255, 255, 255, 0.52);
+    --glass-card-subtle: rgba(255, 255, 255, 0.35);
+    --glass-card-hover: rgba(255, 255, 255, 0.7);
+    --glass-input: rgba(255, 255, 255, 0.65);
+
+    --glass-border: rgba(255, 255, 255, 0.7);
+    --glass-border-light: rgba(255, 255, 255, 0.9);
+    --glass-border-focus: rgba(10, 102, 194, 0.8);
+
+    --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.12);
+    --glass-inner-glow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.9);
+
+    --primary-blue: #0a66c2;
+    --primary-blue-dark: #004182;
+    --primary-gradient: linear-gradient(135deg, #0a66c2 0%, #3b82f6 50%, #6366f1 100%);
+    --accent-gradient: linear-gradient(135deg, rgba(10, 102, 194, 0.15) 0%, rgba(99, 102, 241, 0.12) 100%);
+    --success-gradient: linear-gradient(135deg, #057642 0%, #10b981 100%);
+
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+
+    --radius: 12px;
+    --radius-sm: 8px;
+    --radius-pill: 9999px;
 
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-        Helvetica, Arial, sans-serif;
-    font-size: 14px;
+        "Inter", Helvetica, Arial, sans-serif;
+    font-size: 13.5px;
     line-height: 1.5;
     color: var(--text-primary);
-    background: var(--bg);
 }
 
 body {
-    width: 360px;
-    min-height: 480px;
+    width: 380px;
+    min-height: 520px;
     max-height: 600px;
     overflow-y: auto;
     overflow-x: hidden;
+    background: 
+        radial-gradient(at 0% 0%, rgba(10, 102, 194, 0.18) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+        radial-gradient(at 50% 100%, rgba(6, 182, 212, 0.18) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.12) 0px, transparent 50%),
+        linear-gradient(135deg, #eef4fb 0%, #e0eafc 50%, #e8f0fe 100%);
+    background-attachment: fixed;
+    color: var(--text-primary);
 }
 
 #root {
     width: 100%;
     min-height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Frosted Glass Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 5px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.2);
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(10, 102, 194, 0.25);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(10, 102, 194, 0.45);
 }
 
 input, textarea, select, button {
@@ -52,3 +88,5 @@ input, textarea, select, button {
 button {
     cursor: pointer;
 }
+
+

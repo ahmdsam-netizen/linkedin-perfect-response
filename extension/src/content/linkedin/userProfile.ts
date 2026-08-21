@@ -14,13 +14,9 @@ import { SELECTORS } from "./selectors.ts";
  * Merges discovered fields with existing saved profile in chrome.storage.local.
  */
 export async function syncUserProfileFromDOM(): Promise<Partial<UserProfile> | null> {
-    let extracted: Partial<UserProfile> | null = null;
-
-    if (isOwnProfilePage()) {
-        extracted = extractFullOwnProfile();
-    } else {
-        extracted = extractMiniProfile();
-    }
+    let extracted: Partial<UserProfile> | null = isOwnProfilePage()
+        ? extractFullOwnProfile()
+        : extractMiniProfile();
 
     // If local profile is missing skills or background, auto-fetch /in/me/ in background
     const existing = await getUserProfile();
@@ -63,12 +59,16 @@ export function isOwnProfilePage(): boolean {
         return false;
     }
 
-    const hasOwnIndicator = document.querySelector(
-        "button[aria-label*='Edit intro'], a[href*='add-edit-profile-section'], .profile-topcard-actions--edit, .pv-top-card__edit-photo, .pvs-profile-actions__action--edit"
-    ) !== null;
-    if (hasOwnIndicator) return true;
+    if (window.location.pathname.startsWith("/in/me")) {
+        return true;
+    }
 
-    return false;
+    // Check for any edit buttons / controls present only on own profile
+    const hasOwnIndicator = document.querySelector(
+        "button[aria-label*='edit' i], a[href*='add-edit-profile-section'], a[href*='overlay/edit/'], a[href*='edit/forms/'], .profile-topcard-actions--edit, .pv-top-card__edit-photo, .pvs-profile-actions__action--edit, button[data-control-name*='edit' i], div[data-view-name*='profile-edit']"
+    ) !== null;
+
+    return hasOwnIndicator;
 }
 
 /**
@@ -94,26 +94,30 @@ export function extractFullOwnProfile(): Partial<UserProfile> {
         data.role = cleanText(headlineEl.textContent);
     }
 
-    const aboutSec = findSectionByHeading(["about", "summary", "about me"]);
+    // About extraction
+    const aboutSec = findSectionByHeading(["about", "summary", "about me"]) || document.querySelector("section:has(#about), #about ~ div, div[data-view-name*='about']");
     if (aboutSec && !data.background) {
-        const text = findSubstantiveText(aboutSec);
+        const text = findSubstantiveText(aboutSec as HTMLElement);
         if (text) data.background = cleanAbout(text);
     }
 
+    // Skills extraction
     const domSkills: string[] = [];
-    const skillsSec = findSectionByHeading(["skills", "skills & endorsements", "top skills"]);
-    if (skillsSec) {
-        skillsSec.querySelectorAll<HTMLElement>(
-            "a[data-field='skill_card_skill_topic'] span[aria-hidden='true'], .hoverable-link-text span[aria-hidden='true'], li span[aria-hidden='true']"
+    const skillsSec = findSectionByHeading(["skills", "skills & endorsements", "top skills"]) || document.querySelector("section:has(#skills), #skills ~ div");
+    const skillRoots = skillsSec ? [skillsSec] : [document.body];
+    
+    skillRoots.forEach((root) => {
+        root.querySelectorAll<HTMLElement>(
+            "a[data-field='skill_card_skill_topic'] span[aria-hidden='true'], .hoverable-link-text span[aria-hidden='true'], div[data-view-name*='skill'] span[aria-hidden='true'], .pvs-list__paged-list-item .mr1.hoverable-link-text span[aria-hidden='true'], .pvs-list__paged-list-item div.t-bold span[aria-hidden='true'], div[data-field='skill_card_skill_topic'] span[aria-hidden='true']"
         ).forEach((el) => {
             const text = cleanText(el.textContent || "");
             if (isValidSkill(text) && !domSkills.includes(text)) {
                 domSkills.push(text);
             }
         });
-    }
+    });
 
-    const combinedSkills = Array.from(new Set([...(jsonExtracted.skills || []), ...domSkills])).slice(0, 50);
+    const combinedSkills = Array.from(new Set([...(jsonExtracted.skills || []), ...domSkills])).filter(isValidSkill).slice(0, 50);
     if (combinedSkills.length > 0) {
         data.skills = combinedSkills;
     }
@@ -150,9 +154,9 @@ export function extractMiniProfile(): Partial<UserProfile> {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function findSectionByHeading(keywords: string[]): HTMLElement | null {
-    const sections = Array.from(document.querySelectorAll<HTMLElement>("section, div.artdeco-card"));
+    const sections = Array.from(document.querySelectorAll<HTMLElement>("section, div.artdeco-card, div[data-view-name='profile-card']"));
     for (const sec of sections) {
-        const h2 = sec.querySelector("h2, h3, div.pvs-header__title");
+        const h2 = sec.querySelector("h2, h3, div.pvs-header__title, .pvs-header__title");
         const title = h2?.textContent?.toLowerCase().trim() || "";
         if (keywords.some((kw) => title.includes(kw))) {
             return sec;

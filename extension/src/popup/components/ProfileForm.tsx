@@ -1,13 +1,6 @@
 import { useState, useEffect } from "react";
 import { getUserProfile, saveUserProfile, getDefaultUserProfile } from "../../shared/storage.ts";
-import type { UserProfile, CommunicationStyle } from "../../shared/types.ts";
-
-const STYLE_OPTIONS: { value: CommunicationStyle; label: string; desc: string }[] = [
-    { value: "professional", label: "Professional", desc: "Formal, business-appropriate tone" },
-    { value: "casual", label: "Casual", desc: "Friendly and relaxed" },
-    { value: "concise", label: "Concise", desc: "Short and to the point" },
-    { value: "detailed", label: "Detailed", desc: "Thorough and comprehensive" },
-];
+import type { UserProfile } from "../../shared/types.ts";
 
 export function ProfileForm() {
     const [profile, setProfile] = useState<UserProfile>(getDefaultUserProfile());
@@ -18,7 +11,22 @@ export function ProfileForm() {
     const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
     useEffect(() => {
-        loadProfile();
+        let isMounted = true;
+        getUserProfile().then((stored) => {
+            if (isMounted) {
+                if (stored) {
+                    setProfile({
+                        ...getDefaultUserProfile(),
+                        ...stored,
+                        skills: Array.isArray(stored.skills) ? stored.skills : [],
+                    });
+                }
+                setLoading(false);
+            }
+        });
+        return () => {
+            isMounted = false;
+        };
     }, []);
 
     async function loadProfile() {
@@ -38,56 +46,66 @@ export function ProfileForm() {
         setSyncMessage(null);
 
         try {
-            // Find active tab
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-            const activeTab = tabs[0];
-
-            if (!activeTab?.id || !activeTab.url?.includes("linkedin.com")) {
-                setSyncMessage("⚠️ Please open a LinkedIn tab first!");
-                setSyncing(false);
-                return;
-            }
-
-            // Send extraction request to content script in the active tab
-            const response = await chrome.tabs.sendMessage(activeTab.id, {
-                type: "EXTRACT_PAGE_PROFILE",
+            // 1. Trigger background Voyager API sync directly using authenticated session cookies
+            await chrome.runtime.sendMessage({
+                type: "FETCH_OWN_PROFILE_BACKGROUND",
             });
 
-            const payload = response?.payload;
-            if (payload) {
-                // Reload profile from storage
-                await loadProfile();
-                const skillCount = Array.isArray(payload.skills) ? payload.skills.length : 0;
-                setSyncMessage(
-                    `✨ Successfully synced! (${skillCount} skills detected, Name="${payload.name || "synced"}")`
-                );
-            } else {
-                setSyncMessage("ℹ️ Tip: Visit your LinkedIn profile page (e.g. /in/your-name) for full details including skills & background!");
+            // 2. Also try page extraction if active tab is on LinkedIn
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const activeTab = tabs[0];
+            if (activeTab?.id && activeTab.url?.includes("linkedin.com")) {
+                try {
+                    await chrome.tabs.sendMessage(activeTab.id, {
+                        type: "EXTRACT_PAGE_PROFILE",
+                    });
+                } catch {
+                    // Ignore content script message failure
+                }
             }
+
+            // 3. Reload profile from storage into form
+            await loadProfile();
+            const current = await getUserProfile();
+            const skillCount = current?.skills?.length || 0;
+            const role = current?.role || "";
+
+            setSyncMessage(
+                `✨ Synced from LinkedIn! (${skillCount} skills detected${role ? `, Role: "${role.slice(0, 30)}..."` : ""})`
+            );
         } catch (err) {
             console.error("Sync error:", err);
-            setSyncMessage("ℹ️ Tip: Open your LinkedIn profile page and try syncing again!");
+            setSyncMessage("ℹ️ Tip: Open your LinkedIn tab and try syncing again!");
         } finally {
             setSyncing(false);
             setTimeout(() => setSyncMessage(null), 6000);
         }
     }
 
+    function updateAndPersist(updated: UserProfile) {
+        setProfile(updated);
+        saveUserProfile(updated).then(() => {
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
+        });
+    }
 
     function handleChange(field: keyof UserProfile, value: UserProfile[typeof field]) {
-        setProfile((prev) => ({ ...prev, [field]: value }));
-        setSaved(false);
+        const updated = { ...profile, [field]: value };
+        updateAndPersist(updated);
     }
 
     function addSkill() {
         const trimmed = skillInput.trim();
         if (!trimmed || profile.skills.includes(trimmed)) return;
-        handleChange("skills", [...profile.skills, trimmed]);
+        const updated = { ...profile, skills: [...profile.skills, trimmed] };
+        updateAndPersist(updated);
         setSkillInput("");
     }
 
     function removeSkill(skill: string) {
-        handleChange("skills", profile.skills.filter((s) => s !== skill));
+        const updated = { ...profile, skills: profile.skills.filter((s) => s !== skill) };
+        updateAndPersist(updated);
     }
 
     function handleSkillKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -190,31 +208,6 @@ export function ProfileForm() {
                     value={profile.background}
                     onChange={(e) => handleChange("background", e.target.value)}
                 />
-            </div>
-
-            <div className="form-group">
-                <label>Communication Style</label>
-                <div className="style-options">
-                    {STYLE_OPTIONS.map((opt) => (
-                        <label
-                            key={opt.value}
-                            className={[
-                                "style-option",
-                                profile.style === opt.value ? "selected" : "",
-                            ].join(" ")}
-                        >
-                            <input
-                                type="radio"
-                                name="style"
-                                value={opt.value}
-                                checked={profile.style === opt.value}
-                                onChange={() => handleChange("style", opt.value)}
-                            />
-                            <span className="style-label">{opt.label}</span>
-                            <span className="style-desc">{opt.desc}</span>
-                        </label>
-                    ))}
-                </div>
             </div>
 
             <button

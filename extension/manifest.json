@@ -5,12 +5,17 @@
   "description": "AI-powered contextual LinkedIn replies",
 
   "permissions": [
-    "storage"
+    "storage",
+    "cookies",
+    "activeTab",
+    "tabs"
   ],
 
   "host_permissions": [
-    "https://www.linkedin.com/*"
+    "https://www.linkedin.com/*",
+    "http://localhost:8000/*"
   ],
+
 
   "background": {
     "service_worker": "src/background/service_worker.ts",

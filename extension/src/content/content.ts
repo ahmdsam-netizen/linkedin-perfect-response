@@ -3,16 +3,16 @@
  * Entry point for the LinkedIn AI Reply extension.
  *
  * Responsibilities:
- *  1. Cache any /in/ profile page that the user visits (passive, silent)
- *  2. Inject "✨ Generate Reply" button into every message composer found
- *  3. Sync the USER's own profile data into chrome.storage
- *  4. Handle on-demand sync requests from the popup
+ *  1. Inject "✨ Generate Reply" button into every message composer found
+ *  2. Sync the USER's own profile data into chrome.storage
+ *  3. Handle on-demand sync & conversation extraction requests from the popup
+ *  4. Handle reply insertion requests from the popup
  *  5. Re-run all of the above on SPA navigation
  */
 
-import { injectReplyButton } from "./ui/replyButton.ts";
+import { injectReplyButton, buildConversationContext } from "./ui/replyButton.ts";
 import { syncUserProfileFromDOM } from "./linkedin/userProfile.ts";
-import { captureAndCacheCurrentProfile, isAnyProfilePage } from "./linkedin/anyProfile.ts";
+import { insertReplyIntoComposer } from "./linkedin/composer.ts";
 import type { ExtensionMessage } from "../shared/messages.ts";
 
 // ─── Initialization ───────────────────────────────────────────────────────────
@@ -23,24 +23,19 @@ console.log("[LinkedIn AI] Extension loaded on:", window.location.href);
 setTimeout(init, 800);
 
 function init(): void {
-    // 1. If on a profile page — cache it (works for self AND others)
-    if (isAnyProfilePage()) {
-        captureAndCacheCurrentProfile();
-    }
-
-    // 2. Sync OWN profile data from DOM (name, role, skills for popup prefill)
+    // 1. Sync OWN profile data from DOM (name, role, skills for popup prefill)
     syncUserProfileFromDOM();
 
-    // 3. Inject reply button into any visible message composer
+    // 2. Inject reply button into any visible message composer
     injectReplyButton();
 
-    // 4. Listen for popup messages (on-demand sync)
+    // 3. Listen for popup messages (on-demand sync, active convo extract, insertion)
     setupMessageListener();
 
-    // 5. Watch for DOM mutations (new chat bubbles, SPA navigation)
+    // 4. Watch for DOM mutations (new chat bubbles, SPA navigation)
     setupMutationObserver();
 
-    // 6. Heartbeat — catches chat windows that open after page load
+    // 5. Heartbeat — catches chat windows that open after page load
     setInterval(injectReplyButton, 1500);
 }
 
@@ -59,6 +54,20 @@ function setupMessageListener(): void {
                 });
                 return true;
             }
+
+            if (message.type === "EXTRACT_ACTIVE_CONVERSATION") {
+                buildConversationContext().then((context) => {
+                    sendResponse({ type: "CONVERSATION_EXTRACTED", payload: context });
+                });
+                return true;
+            }
+
+            if (message.type === "INSERT_REPLY_TEXT") {
+                const success = insertReplyIntoComposer(message.payload.text);
+                sendResponse({ type: "REPLY_INSERTED", success });
+                return true;
+            }
+
             return false;
         }
     );
@@ -87,11 +96,8 @@ function setupMutationObserver(): void {
 function onNavigate(): void {
     console.log("[LinkedIn AI] Navigation:", currentUrl);
 
-    // Wait for React to render new page content, then capture
+    // Wait for React to render new page content, then sync
     setTimeout(() => {
-        if (isAnyProfilePage()) {
-            captureAndCacheCurrentProfile();
-        }
         syncUserProfileFromDOM();
         injectReplyButton();
     }, 800);

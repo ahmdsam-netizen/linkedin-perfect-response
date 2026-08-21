@@ -6,10 +6,9 @@
 
 import { extractRecipient } from "../linkedin/profile.ts";
 import { extractConversation } from "../linkedin/conversation.ts";
-import { insertReplyIntoComposer } from "../linkedin/composer.ts";
 import { SELECTORS } from "../linkedin/selectors.ts";
-import type { BackgroundToContentMessage, ContentToBackgroundMessage } from "../../shared/messages.ts";
 import type { ConversationContext } from "../../shared/types.ts";
+import type { ContentToBackgroundMessage } from "../../shared/messages.ts";
 
 const BUTTON_CLASS = "linkedin-ai-reply-btn";
 const CONTAINER_CLASS = "linkedin-ai-reply-container";
@@ -103,7 +102,7 @@ function createButton(form: HTMLElement): HTMLButtonElement {
     btn.className = BUTTON_CLASS;
     btn.type = "button";
     btn.textContent = "✨ Generate Reply";
-    btn.title = "Generate an AI reply based on your profile & this conversation";
+    btn.title = "Generate an AI reply (or open extension popup for custom styles & prompts)";
 
     applyButtonStyles(btn, "idle");
 
@@ -168,73 +167,37 @@ function applyButtonStyles(
 
 async function handleButtonClick(btn: HTMLButtonElement, form: HTMLElement): Promise<void> {
     btn.disabled = true;
-    btn.textContent = "⏳ Generating...";
+    btn.textContent = "⏳ Opening...";
     applyButtonStyles(btn, "loading");
 
     try {
         const context = await buildConversationContext(form);
 
-        const message: ContentToBackgroundMessage = {
-            type: "GENERATE_REPLY",
-            payload: context,
-        };
+        // Save the active conversation context for the popup
+        await chrome.storage.local.set({ activeConversationContext: context });
 
-        const response = await chrome.runtime.sendMessage<
-            ContentToBackgroundMessage,
-            BackgroundToContentMessage
-        >(message);
+        // Request background service worker to open the extension popup
+        await chrome.runtime.sendMessage<ContentToBackgroundMessage>({
+            type: "OPEN_POPUP",
+        });
 
-        if (!response) {
-            throw new Error("Extension background service worker did not respond. Please refresh the page.");
-        }
-
-        if (response.type === "REPLY_GENERATED") {
-            insertReplyIntoComposer(response.payload.text, form);
-            btn.textContent = "✅ Reply inserted";
-            btn.title = "Generated reply inserted successfully!";
-            applyButtonStyles(btn, "success");
-
-            setTimeout(() => {
-                btn.textContent = "✨ Generate Reply";
-                btn.title = "Generate an AI reply based on your profile & this conversation";
-                applyButtonStyles(btn, "idle");
-                btn.disabled = false;
-            }, 2500);
-        } else if (response.type === "REPLY_ERROR") {
-            const errStr = response.error || "Unknown backend error";
-            btn.textContent = "❌ Error";
-            btn.title = `Error: ${errStr}`;
-            applyButtonStyles(btn, "error");
-            btn.disabled = false;
-            console.error("[LinkedIn AI] Generation error:", errStr);
-
-            setTimeout(() => {
-                btn.textContent = "✨ Generate Reply";
-                btn.title = "Generate an AI reply based on your profile & this conversation";
-                applyButtonStyles(btn, "idle");
-            }, 4000);
-        }
+        btn.textContent = "✨ Generate Reply";
+        btn.title = "Configure and generate your AI reply in the extension popup";
+        applyButtonStyles(btn, "idle");
+        btn.disabled = false;
     } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        btn.textContent = "❌ Error";
-        btn.title = `Error: ${errorMsg}`;
-        applyButtonStyles(btn, "error");
+        console.warn("[LinkedIn AI] Open popup notice:", errorMsg);
+        btn.textContent = "✨ Generate Reply";
+        btn.title = "Click extension icon in your browser toolbar to generate reply!";
+        applyButtonStyles(btn, "idle");
         btn.disabled = false;
-        console.error("[LinkedIn AI] Unexpected error:", errorMsg);
-
-        setTimeout(() => {
-            btn.textContent = "✨ Generate Reply";
-            btn.title = "Generate an AI reply based on your profile & this conversation";
-            applyButtonStyles(btn, "idle");
-        }, 4000);
     }
 }
 
-// ─── Context Building ─────────────────────────────────────────────────────────
-
-async function buildConversationContext(form: HTMLElement): Promise<ConversationContext> {
+export async function buildConversationContext(form?: HTMLElement | null): Promise<ConversationContext> {
     const recipient = await extractRecipient(form);
-    const messages = extractConversation(form);
+    const messages = extractConversation(form, "Sayem Ahmad", recipient.name);
 
     return { recipient, messages };
 }
