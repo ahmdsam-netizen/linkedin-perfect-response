@@ -1,6 +1,29 @@
-anyio==4.14.2
-fastapi==0.141.1
-pydantic==2.13.4
-pydantic_core==2.46.4
-starlette==1.6.0
-uvicorn==0.52.4
+# LinkedIn AI Reply — Backend Dependencies
+# =========================================
+# Install: pip install -r requirements.txt
+#
+# ⚠️  Requires Python 3.12 or 3.13.
+#     Python 3.14 is NOT yet supported — pydantic-core has no pre-built wheel
+#     for it and the Rust compilation fails.
+#     Create your venv with:  python3.12 -m venv venv
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# ── Pydantic & Settings ───────────────────────────────────────────────────────
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+
+# ── LangChain ────────────────────────────────────────────────────────────────
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-google-genai>=2.0.0
+
+# ── Environment ───────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0        # required by FastAPI TestClient

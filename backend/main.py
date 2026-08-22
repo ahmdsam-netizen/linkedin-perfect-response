@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import json
 
 app = FastAPI(title="LinkedIn AI Reply — Debug Server")
@@ -17,38 +17,43 @@ app.add_middleware(
 # ─── Pydantic models (mirror shared/types.ts) ─────────────────────────────────
 
 class LinkedInPerson(BaseModel):
-    name: str
+    name: str = "Recipient"
     headline: str | None = None
     company: str | None = None
     position: str | None = None
     profileUrl: str | None = None
     about: str | None = None
-    skills: list[str] = []
-    recentPosts: list[str] = []
+    skills: list[str] = Field(default_factory=list)
+    recentPosts: list[str] = Field(default_factory=list)
 
 
 class Message(BaseModel):
     sender: str          # "me" | "them"
-    text: str
+    text: str = ""
     timestamp: str | None = None
 
 
 class ConversationContext(BaseModel):
-    recipient: LinkedInPerson
-    messages: list[Message]
+    recipient: LinkedInPerson = Field(default_factory=LinkedInPerson)
+    messages: list[Message] = Field(default_factory=list)
 
 
 class UserProfile(BaseModel):
-    name: str
-    role: str
-    skills: list[str]
-    background: str
-    style: str           # "professional" | "casual" | "concise" | "detailed"
+    name: str = "LinkedIn User"
+    role: str = ""
+    skills: list[str] = Field(default_factory=list)
+    background: str | None = ""
+    style: str | None = None
 
 
 class GenerateReplyRequest(BaseModel):
-    context: ConversationContext
-    userProfile: UserProfile
+    context: ConversationContext = Field(default_factory=ConversationContext)
+    userProfile: UserProfile = Field(default_factory=UserProfile)
+    myName: str | None = None
+    recipientName: str | None = None
+    relationship: str | None = None
+    style: str | None = None
+    userPrompt: str | None = None
 
 
 # ─── Endpoint ─────────────────────────────────────────────────────────────────
@@ -60,19 +65,21 @@ async def generate_reply(body: GenerateReplyRequest):
     print("📨  REQUEST RECEIVED FROM EXTENSION")
     print("=" * 60)
 
+    recip = body.context.recipient
+    recip_name = body.recipientName or recip.name or "Recipient"
     print("\n👤  RECIPIENT / PERSON DETAILS:")
-    print(f"    Name          : {body.context.recipient.name}")
-    print(f"    Headline      : {body.context.recipient.headline}")
-    print(f"    Position      : {body.context.recipient.position}")
-    print(f"    Company       : {body.context.recipient.company}")
-    print(f"    Profile URL   : {body.context.recipient.profileUrl}")
-    if body.context.recipient.about:
-        print(f"    Description   : {body.context.recipient.about[:200]}...")
-    if body.context.recipient.skills:
-        print(f"    Skills ({len(body.context.recipient.skills)}) : {', '.join(body.context.recipient.skills)}")
-    if body.context.recipient.recentPosts:
-        print(f"    Posts/Activity: {len(body.context.recipient.recentPosts)} recent post(s)")
-        for p_idx, post_text in enumerate(body.context.recipient.recentPosts, 1):
+    print(f"    Name          : {recip_name}")
+    print(f"    Headline      : {recip.headline or 'None'}")
+    print(f"    Position      : {recip.position or 'None'}")
+    print(f"    Company       : {recip.company or 'None'}")
+    print(f"    Profile URL   : {recip.profileUrl or 'None'}")
+    if recip.about:
+        print(f"    Description   : {recip.about[:200]}...")
+    if recip.skills:
+        print(f"    Skills ({len(recip.skills)}) : {', '.join(recip.skills)}")
+    if recip.recentPosts:
+        print(f"    Posts/Activity: {len(recip.recentPosts)} recent post(s)")
+        for p_idx, post_text in enumerate(recip.recentPosts, 1):
             print(f"       [{p_idx}] {post_text[:100]}...")
 
     print(f"\n💬  CONVERSATION ({len(body.context.messages)} messages):")
@@ -81,20 +88,28 @@ async def generate_reply(body: GenerateReplyRequest):
         who   = "Me  " if msg.sender == "me" else "Them"
         print(f"    [{i}] {arrow} {who}: {msg.text[:120]}")
 
-    print("\n🧑  USER PROFILE:")
-    print(f"    Name       : {body.userProfile.name}")
-    print(f"    Role       : {body.userProfile.role}")
-    print(f"    Skills     : {', '.join(body.userProfile.skills)}")
-    print(f"    Style      : {body.userProfile.style}")
-    print(f"    Background : {body.userProfile.background[:120]}")
+    print("\n🧑  SENDER / USER PROFILE:")
+    my_name = body.myName or body.userProfile.name or "LinkedIn User"
+    print(f"    My Name    : {my_name}")
+    print(f"    Role       : {body.userProfile.role or 'None'}")
+    skills_list = body.userProfile.skills or []
+    print(f"    Skills     : {', '.join(skills_list)}")
+    bg = body.userProfile.background or ""
+    print(f"    Background : {bg[:120] if bg else 'None'}")
+
+    print("\n🎯  GENERATION PARAMETERS:")
+    print(f"    Relationship  : {body.relationship or 'Default (Connection)'}")
+    print(f"    Reply Style   : {body.style or body.userProfile.style or 'professional'}")
+    print(f"    Custom Prompt : {body.userPrompt or '(None - Contextual auto-reply)'}")
 
     print("\n📋  RAW JSON:")
     print(json.dumps(body.model_dump(), indent=2))
     print("=" * 60 + "\n")
 
-    # Return a hardcoded placeholder reply so the extension shows something
+    # Return placeholder reply
+    first_name = recip_name.split()[0] if recip_name and recip_name != "Recipient" else "there"
     return {
-        "reply": "[DEBUG] Backend received your request! Check the terminal for details.",
+        "reply": f"Hi {first_name}, thanks for reaching out! I appreciate you connecting.",
         "confidence": 1.0,
     }
 
@@ -102,3 +117,4 @@ async def generate_reply(body: GenerateReplyRequest):
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "LinkedIn AI Reply debug server is running."}
+
