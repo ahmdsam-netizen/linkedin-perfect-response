@@ -12,25 +12,27 @@ A production-grade, two-pass AI assistant for LinkedIn messaging. The system con
 │                                                                                 │
 │   LinkedIn DOM Chat           Popup UI (React 18)       Background Worker       │
 │  ┌──────────────────┐        ┌───────────────────┐     ┌──────────────────┐     │
-│  │ Active Chat Box  │───────►│ Style Tabs, Prompts│────►│ Message Handler  │     │
+│  │ Active Chat Box  │───────►│Style Tabs, Prompts│────►│ Message Handler  │     │
 │  │ Context Extractor│        │ & Reply Preview   │     │ & Profile Fetcher│     │
 │  └──────────────────┘        └───────────────────┘     └─────────┬────────┘     │
 └──────────────────────────────────────────────────────────────────┼──────────────┘
                                                                    │
                                                 POST /api/v1/reply/generate
                                                                    │
-┌──────────────────────────────────────────────────────────────────▼──────────────┐
+                                                                   ▼
+┌──────────────────────────────────────────────────────────────────-──────────────┐
 │                            FASTAPI BACKEND (PYTHON 3.12)                        │
 │                                                                                 │
 │   FastAPI Route             Service Orchestrator          LangChain Chains      │
 │  ┌──────────────────┐       ┌──────────────────────┐     ┌───────────────────┐  │
-│  │ app/api/routes   │──────►│ reply_service.py    │────►│ Pass 1: Analysis  │  │
+│  │ app/api/routes   │──────►│ reply_service.py     │────►│ Pass 1: Analysis  │  │
 │  │  /reply/generate │       │                      │     │ Pass 2: Generation│  │
 │  └──────────────────┘       └──────────────────────┘     └─────────┬─────────┘  │
 └────────────────────────────────────────────────────────────────────┼────────────┘
-                                                                     │
+                                                                     |
+                                                                     ▼
                                                            Google Gemini API
-                                                         (gemini-3.6-flash)
+                                                          (gemini-3.6-flash)
 ```
 
 ---
