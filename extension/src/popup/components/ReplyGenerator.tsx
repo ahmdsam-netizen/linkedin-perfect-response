@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { getUserProfile, getDefaultUserProfile } from "../../shared/storage.ts";
-import type { CommunicationStyle, ConversationContext, UserProfile } from "../../shared/types.ts";
+import type { CommunicationStyle, ConversationContext, ReplyOption, UserProfile } from "../../shared/types.ts";
 import type {
     ContentToBackgroundMessage,
     BackgroundToContentMessage,
@@ -52,6 +52,9 @@ export function ReplyGenerator() {
 
     const [generating, setGenerating] = useState(false);
     const [generatedReply, setGeneratedReply] = useState("");
+    const [replyOptions, setReplyOptions] = useState<ReplyOption[]>([]);
+    const [activeOptionIndex, setActiveOptionIndex] = useState(0);
+
     const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
     useEffect(() => {
@@ -156,7 +159,12 @@ export function ReplyGenerator() {
             >(message);
 
             if (response && response.type === "REPLY_GENERATED") {
-                setGeneratedReply(response.payload.text);
+                const opts = response.payload.replies || [
+                    { style: style || "professional", text: response.payload.text }
+                ];
+                setReplyOptions(opts);
+                setActiveOptionIndex(0);
+                setGeneratedReply(opts[0]?.text || response.payload.text || "");
             } else if (response && response.type === "REPLY_ERROR") {
                 setStatusMessage({ type: "error", text: response.error || "Failed to generate reply." });
             } else {
@@ -167,6 +175,13 @@ export function ReplyGenerator() {
             setStatusMessage({ type: "error", text: msg });
         } finally {
             setGenerating(false);
+        }
+    }
+
+    function selectReplyTab(idx: number) {
+        setActiveOptionIndex(idx);
+        if (replyOptions[idx]) {
+            setGeneratedReply(replyOptions[idx].text);
         }
     }
 
@@ -191,7 +206,7 @@ export function ReplyGenerator() {
 
             if (response?.type === "REPLY_INSERTED" && response.success) {
                 setStatusMessage({ type: "success", text: "🚀 Reply inserted into LinkedIn message box!" });
-                setTimeout(() => window.close(), 1200);
+                setTimeout(() => setStatusMessage(null), 4000);
             } else {
                 setStatusMessage({ type: "info", text: "ℹ️ Please open a message chat in LinkedIn and click insert again!" });
             }
@@ -216,6 +231,12 @@ export function ReplyGenerator() {
     function applyPromptSuggestion(text: string) {
         setPromptText(text);
     }
+
+    const styleLabels: Record<string, string> = {
+        professional: "💼 Professional",
+        conversational: "☕ Conversational",
+        concise: "⚡ Concise",
+    };
 
     return (
         <div className="reply-generator-root">
@@ -340,14 +361,33 @@ export function ReplyGenerator() {
                 onClick={handleGenerate}
                 disabled={generating}
             >
-                {generating ? "⏳ Generating Reply..." : "✨ Generate Reply"}
+                {generating ? "⏳ Generating Replies..." : "✨ Generate Reply Options"}
             </button>
 
             {/* Generated Reply Box */}
             {generatedReply && (
                 <div className="reply-preview-container">
+                    {/* Option Tabs if 3 replies available */}
+                    {replyOptions.length > 1 && (
+                        <div className="reply-style-tabs" style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
+                            {replyOptions.map((opt, idx) => (
+                                <button
+                                    type="button"
+                                    key={opt.style + idx}
+                                    className={`chip-btn ${activeOptionIndex === idx ? "active" : ""}`}
+                                    style={{ flex: 1, padding: "6px 8px", fontSize: "12px", textTransform: "capitalize" }}
+                                    onClick={() => selectReplyTab(idx)}
+                                >
+                                    {styleLabels[opt.style] || opt.style}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
                     <div className="reply-preview-top">
-                        <span className="reply-preview-label">📝 Generated Reply Preview</span>
+                        <span className="reply-preview-label">
+                            📝 {styleLabels[replyOptions[activeOptionIndex]?.style] || replyOptions[activeOptionIndex]?.style || "Generated"} Reply Preview
+                        </span>
                         <button type="button" className="btn-mini-regen" onClick={handleGenerate} disabled={generating}>
                             🔄 Regenerate
                         </button>
@@ -356,7 +396,14 @@ export function ReplyGenerator() {
                         className="reply-preview-textarea"
                         rows={4}
                         value={generatedReply}
-                        onChange={(e) => setGeneratedReply(e.target.value)}
+                        onChange={(e) => {
+                            setGeneratedReply(e.target.value);
+                            if (replyOptions[activeOptionIndex]) {
+                                const updated = [...replyOptions];
+                                updated[activeOptionIndex] = { ...updated[activeOptionIndex], text: e.target.value };
+                                setReplyOptions(updated);
+                            }
+                        }}
                     />
                     <div className="reply-preview-actions">
                         <button type="button" className="btn-insert-main" onClick={handleInsertIntoChat}>

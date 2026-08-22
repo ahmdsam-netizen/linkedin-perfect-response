@@ -59,8 +59,14 @@ export interface GenerateReplyRequest {
     userPrompt?: string;
 }
 
+export interface ReplyOption {
+    style: "professional" | "conversational" | "concise" | string;
+    text: string;
+}
+
 export interface GeneratedReply {
     text: string;
+    replies?: ReplyOption[];
     confidence?: number;
 }
 

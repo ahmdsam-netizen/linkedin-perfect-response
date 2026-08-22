@@ -546,12 +546,15 @@ async function handleGenerateReply(
             };
         }
 
-        // 2. Ensure recipient profile is enriched
+        // 2. Ensure recipient profile is enriched (with 1.5s max timeout so request never stalls)
         const recipient = { ...payload.context.recipient };
         const recipientUrl = recipient.profileUrl;
         if (recipientUrl && (!recipient.headline || !recipient.skills?.length || !recipient.about)) {
             try {
-                const fetchedRecip = await fetchLinkedInProfileData(recipientUrl);
+                const fetchedRecip = await Promise.race([
+                    fetchLinkedInProfileData(recipientUrl),
+                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+                ]);
                 if (fetchedRecip) {
                     recipient.headline = recipient.headline || fetchedRecip.headline;
                     recipient.about = recipient.about || fetchedRecip.about;
@@ -582,7 +585,7 @@ async function handleGenerateReply(
             userPrompt: payload.userPrompt,
         };
 
-        const response = await fetch(`${API_BASE_URL}/api/generate-reply`, {
+        const response = await fetch(`${API_BASE_URL}/api/v1/reply/generate`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -598,13 +601,21 @@ async function handleGenerateReply(
             };
         }
 
-        const data = await response.json() as { reply: string; confidence?: number };
+        const data = await response.json() as {
+            reply?: string;
+            replies?: Array<{ style: string; text: string }>;
+            confidence?: number;
+        };
+
+        const repliesList = data.replies || (data.reply ? [{ style: payload.style || "professional", text: data.reply }] : []);
+        const replyText = repliesList[0]?.text || data.reply || "";
 
         return {
             type: "REPLY_GENERATED",
             payload: {
-                text: data.reply,
-                confidence: data.confidence,
+                text: replyText,
+                replies: repliesList,
+                confidence: data.confidence || 1.0,
             },
         };
     } catch (err) {
