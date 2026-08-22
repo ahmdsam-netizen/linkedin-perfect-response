@@ -4,7 +4,7 @@ A production-grade, two-pass AI assistant for LinkedIn messaging. The system con
 
 ---
 
-## 🏗️ Architecture & Data Flow
+##  Architecture & Data Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -37,7 +37,7 @@ A production-grade, two-pass AI assistant for LinkedIn messaging. The system con
 
 ---
 
-## 🚀 Tech Stack
+##  Tech Stack
 
 ### Frontend (Chrome Extension)
 - **Framework**: React 18, TypeScript, Vite
@@ -55,7 +55,7 @@ A production-grade, two-pass AI assistant for LinkedIn messaging. The system con
 
 ---
 
-## 📁 Repository Structure
+##  Repository Structure
 
 ```
 linkedin-reply-extension/
@@ -110,7 +110,7 @@ linkedin-reply-extension/
 
 ---
 
-## ⚡ Quickstart Guide
+##  Quickstart Guide
 
 ### 1. Prerequisites
 - **Python**: `3.12` installed (`python3.12 --version`)
@@ -189,7 +189,7 @@ linkedin-reply-extension/
 
 ---
 
-## 📡 API Endpoints Reference
+##  API Endpoints Reference
 
 ### 1. `POST /api/v1/reply/generate` (also aliased as `/api/generate-reply`)
 Accepts scraped LinkedIn conversation context and returns three structured reply suggestions.
@@ -268,13 +268,13 @@ Health check endpoint to verify backend liveness. Returns `{"status": "ok"}`.
 
 ---
 
-## ✨ Features & Highlights
+##  Features & Highlights
 
 - **Two-Pass AI Pipeline**:
   - **Pass 1 (Analysis)**: Gemini analyzes conversation topics, tone, stage, key facts, open questions, and last message intent.
   - **Pass 2 (Generation)**: Context engineering combines user profile, recipient profile, relationship, conversation history, analysis, and custom prompt to produce 3 distinct replies.
 - **Interactive Multi-Style Tabs**:
-  - The Chrome extension popup displays 3 clickable tabs (`💼 Professional`, `☕ Conversational`, `⚡ Concise`). Switch options with 1 click.
+  - The Chrome extension popup displays 3 clickable tabs (` Professional`, ` Conversational`, ` Concise`). Switch options with 1 click.
 - **Smart DOM Insertion**:
   - Inserts directly into LinkedIn's React Rich Text Editor (`div.msg-form__contenteditable`), preserving inner paragraph formatting and firing synthetic `beforeinput`, `input`, and `change` events so LinkedIn's **Send button** is automatically enabled.
 - **Robust Error Handling & CORS**:
