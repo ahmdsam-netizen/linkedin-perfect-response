@@ -24,7 +24,7 @@ A production-grade, persistent memory AI assistant for LinkedIn messaging. The s
 
 ---
 
-## 🏗️ Architecture & Data Flow
+## Architecture & Data Flow
 
 ```mermaid
 flowchart TD
