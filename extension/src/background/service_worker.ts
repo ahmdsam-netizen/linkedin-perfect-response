@@ -1,12 +1,18 @@
 import type {
     BackgroundToContentMessage,
     ContentToBackgroundMessage,
-    GenerateReplyPayload,
 } from "../shared/messages.ts";
-import type { GenerateReplyRequest } from "../shared/types.ts";
-import { getUserProfile, mergeUserProfile } from "../shared/storage.ts";
+import type {
+    ConversationContext,
+    GeneratedReplyResponse,
+    GenerateReplyRequest,
+    SyncPayload,
+    SyncResponse,
+    UserProfile,
+} from "../shared/types.ts";
+import { mergeUserProfile } from "../shared/storage.ts";
 
-// Backend URL — update when deploying
+// Backend URL
 const API_BASE_URL = "http://localhost:8000";
 
 export interface OwnProfileData {
@@ -26,8 +32,8 @@ chrome.runtime.onMessage.addListener(
         _sender,
         sendResponse: (response: BackgroundToContentMessage | { type: string; payload: unknown }) => void
     ) => {
-        if (message.type === "GENERATE_REPLY") {
-            handleGenerateReply(message.payload)
+        if (message.type === "SYNC_AND_GENERATE_REPLY") {
+            handleSyncAndGenerateReply(message.payload)
                 .then(sendResponse)
                 .catch((err) => {
                     sendResponse({
@@ -115,7 +121,7 @@ async function handleBackgroundOwnProfileFetch(): Promise<OwnProfileData | null>
                 const apiHeaders: Record<string, string> = {
                     "csrf-token": csrfToken,
                     "x-restli-protocol-version": "2.0.0",
-                    "accept": "application/vnd.linkedin.normalized+json+2.1",
+                    accept: "application/vnd.linkedin.normalized+json+2.1",
                 };
 
                 const meResp = await fetch("https://www.linkedin.com/voyager/api/me", {
@@ -165,7 +171,7 @@ async function handleBackgroundOwnProfileFetch(): Promise<OwnProfileData | null>
                 background: ownData.about,
             });
 
-            console.log(`[ServiceWorker] ✅ Successfully synced own profile: ${ownData.skills.length} skills, role="${ownData.headline || "none"}"`);
+            console.log(`[ServiceWorker] ✅ Successfully synced own profile: ${ownData.skills.length} skills`);
             return ownData;
         }
     } catch (err) {
@@ -230,8 +236,6 @@ function parseRawHtml(rawHtml: string, fallbackSlug: string): OwnProfileData | n
         recentPosts: result.recentPosts.slice(0, 5),
     };
 }
-
-
 
 function inspectObject(
     obj: unknown,
@@ -310,7 +314,7 @@ function inspectObject(
         }
     }
 
-    // 4. Arrays of skills specifically on skill properties
+    // 4. Arrays of skills
     if (Array.isArray(record.skills)) {
         for (const s of record.skills) {
             const str = getValStr(s);
@@ -353,7 +357,6 @@ function isValidSkillStr(t: string): boolean {
     const clean = t.trim();
     if (clean.length < 2 || clean.length > 50) return false;
 
-    // Exclude Java/schema namespaces, internal LinkedIn identifiers, recipes, and noise
     if (
         clean.startsWith("com.") ||
         clean.startsWith("org.") ||
@@ -425,13 +428,13 @@ export async function fetchLinkedInProfileData(profileUrlOrSlug: string): Promis
 
     const csrfToken = await getLinkedInCsrfToken();
 
-    // 1. Try LinkedIn Voyager API if CSRF token is available
+    // 1. Try LinkedIn Voyager API
     if (csrfToken) {
         try {
             const apiHeaders: Record<string, string> = {
                 "csrf-token": csrfToken,
                 "x-restli-protocol-version": "2.0.0",
-                "accept": "application/vnd.linkedin.normalized+json+2.1",
+                accept: "application/vnd.linkedin.normalized+json+2.1",
             };
 
             const voyagerUrl = `https://www.linkedin.com/voyager/api/identity/dash/profiles?q=memberIdentity&memberIdentity=${encodeURIComponent(slug)}&decorationId=com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-109`;
@@ -451,11 +454,6 @@ export async function fetchLinkedInProfileData(profileUrlOrSlug: string): Promis
                 };
                 inspectObject(json, result, new Set(), 0);
                 if (result.headline || result.about || result.skills.length > 0) {
-                    console.log(`[ServiceWorker] ✅ Successfully fetched from Voyager API for "${slug}":`, {
-                        headline: result.headline,
-                        skills: result.skills.length,
-                        about: result.about ? "Found" : "None",
-                    });
                     return result;
                 }
             }
@@ -464,7 +462,7 @@ export async function fetchLinkedInProfileData(profileUrlOrSlug: string): Promis
         }
     }
 
-    // 2. Fallback: Fetch raw HTML and parse embedded JSON
+    // 2. Fallback: Fetch raw HTML
     try {
         const fetchHeaders = {
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -513,119 +511,112 @@ export async function fetchLinkedInProfileData(profileUrlOrSlug: string): Promis
     return null;
 }
 
-function parseHeadlineStr(headline?: string): { company?: string; position?: string } {
-    if (!headline) return {};
-    const atMatch = /^(.+?)\s+at\s+(.+)$/i.exec(headline);
-    if (atMatch) return { position: atMatch[1].trim(), company: atMatch[2].trim() };
-    const pipeMatch = /^(.+?)\s*\|\s*(.+)$/.exec(headline);
-    if (pipeMatch) return { position: pipeMatch[1].trim(), company: pipeMatch[2].trim() };
-    return { position: headline };
+// ─── Sync + Generate ──────────────────────────────────────────────────────────
+
+export function buildSyncPayload(
+    context: ConversationContext,
+    userProfile: UserProfile,
+    linkedInConversationId: string
+): SyncPayload {
+    const userLinkedinId =
+        userProfile.name?.toLowerCase().replace(/\s+/g, "-") || "unknown-user";
+
+    return {
+        user: {
+            linkedinId: userLinkedinId,
+            name: userProfile.name || "Unknown",
+        },
+        contact: {
+            linkedinProfileId:
+                context.recipient.profileUrl
+                    ? (context.recipient.profileUrl.match(/\/in\/([^/?#]+)/i)?.[1] ?? context.recipient.name)
+                    : context.recipient.name,
+            name: context.recipient.name,
+            headline: context.recipient.headline,
+        },
+        conversation: {
+            linkedinConversationId: linkedInConversationId,
+        },
+        messages: context.messages.map((m) => ({
+            senderType: m.sender === "me" ? "USER" : "CONTACT",
+            content: m.text,
+        })),
+    };
 }
 
-// ─── Handlers ─────────────────────────────────────────────────────────────────
+async function handleSyncAndGenerateReply(payload: {
+    syncPayload: SyncPayload;
+    instruction?: string;
+    tone?: string;
+    style?: string;
+}): Promise<BackgroundToContentMessage> {
+    const { syncPayload, instruction, tone } = payload;
 
-async function handleGenerateReply(
-    payload: GenerateReplyPayload
-): Promise<BackgroundToContentMessage> {
     try {
-        let userProfile = await getUserProfile();
-
-        // 1. Ensure user profile is rich
-        if (!userProfile || !userProfile.role || !userProfile.skills?.length) {
-            userProfile = {
-                name: payload.myName || userProfile?.name || "Sayem Ahmad",
-                role: userProfile?.role || "Full Stack Developer",
-                skills: userProfile?.skills?.length ? userProfile.skills : ["React", "TypeScript", "Python", "FastAPI", "Web Development"],
-                background: userProfile?.background || "Full Stack Developer building modern web applications, APIs, and AI tools.",
-                style: userProfile?.style || "professional",
-            };
-        } else if (payload.myName) {
-            userProfile = {
-                ...userProfile,
-                name: payload.myName,
-            };
-        }
-
-        // 2. Ensure recipient profile is enriched (with 1.5s max timeout so request never stalls)
-        const recipient = { ...payload.context.recipient };
-        const recipientUrl = recipient.profileUrl;
-        if (recipientUrl && (!recipient.headline || !recipient.skills?.length || !recipient.about)) {
-            try {
-                const fetchedRecip = await Promise.race([
-                    fetchLinkedInProfileData(recipientUrl),
-                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
-                ]);
-                if (fetchedRecip) {
-                    recipient.headline = recipient.headline || fetchedRecip.headline;
-                    recipient.about = recipient.about || fetchedRecip.about;
-                    recipient.skills = (fetchedRecip.skills && fetchedRecip.skills.length > 0) ? fetchedRecip.skills : recipient.skills;
-                    recipient.recentPosts = (fetchedRecip.recentPosts && fetchedRecip.recentPosts.length > 0) ? fetchedRecip.recentPosts : recipient.recentPosts;
-
-                    if (!recipient.company || !recipient.position) {
-                        const parsed = parseHeadlineStr(recipient.headline);
-                        recipient.company = recipient.company || parsed.company;
-                        recipient.position = recipient.position || parsed.position;
-                    }
-                }
-            } catch (recipErr) {
-                console.warn("[ServiceWorker] Recipient enrich error:", recipErr);
-            }
-        }
-
-        const requestBody: GenerateReplyRequest = {
-            context: {
-                ...payload.context,
-                recipient,
-            },
-            userProfile,
-            myName: payload.myName || userProfile.name,
-            recipientName: payload.recipientName || recipient.name,
-            relationship: payload.relationship,
-            style: payload.style || userProfile.style || "professional",
-            userPrompt: payload.userPrompt,
-        };
-
-        const response = await fetch(`${API_BASE_URL}/api/v1/reply/generate`, {
+        // ── Step 1: Sync conversation ────────────────────────────────────────
+        const syncResp = await fetch(`${API_BASE_URL}/api/v1/conversations/sync`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(requestBody),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(syncPayload),
         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
+        if (!syncResp.ok) {
+            const errText = await syncResp.text();
             return {
                 type: "REPLY_ERROR",
-                error: `API error ${response.status}: ${errorText}`,
+                error: `Sync error ${syncResp.status}: ${errText}`,
             };
         }
 
-        const data = await response.json() as {
-            reply?: string;
-            replies?: Array<{ style: string; text: string }>;
-            confidence?: number;
+        const syncData = (await syncResp.json()) as SyncResponse & {
+            conversation_id?: string;
+        };
+        const conversationId = syncData.conversationId || syncData.conversation_id;
+
+        if (!conversationId) {
+            console.error("[ServiceWorker] ❌ Missing conversationId in sync response:", syncData);
+            return {
+                type: "REPLY_ERROR",
+                error: "Conversation sync succeeded but backend did not return a conversationId.",
+            };
+        }
+
+        console.log(`[ServiceWorker] ✅ Sync succeeded. conversationId=${conversationId}`);
+
+        // ── Step 2: Generate reply ───────────────────────────────────────────
+        const generateBody: GenerateReplyRequest = {
+            conversationId,
+            userName: syncPayload.user.name,
+            contactName: syncPayload.contact.name,
+            contactHeadline: syncPayload.contact.headline,
+            ...(instruction ? { instruction } : {}),
+            ...(tone ? { tone } : {}),
         };
 
-        const repliesList = data.replies || (data.reply ? [{ style: payload.style || "professional", text: data.reply }] : []);
-        const replyText = repliesList[0]?.text || data.reply || "";
+        const generateResp = await fetch(`${API_BASE_URL}/api/v1/reply/generate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(generateBody),
+        });
+
+        if (!generateResp.ok) {
+            const errText = await generateResp.text();
+            return {
+                type: "REPLY_ERROR",
+                error: `Generate error ${generateResp.status}: ${errText}`,
+            };
+        }
+
+        const replyData = (await generateResp.json()) as GeneratedReplyResponse;
 
         return {
             type: "REPLY_GENERATED",
-            payload: {
-                text: replyText,
-                replies: repliesList,
-                confidence: data.confidence || 1.0,
-            },
+            payload: replyData,
         };
     } catch (err) {
-        const message =
-            err instanceof Error ? err.message : "Unknown error occurred";
-
-        // Distinguish network errors (backend not running) from other errors
+        const message = err instanceof Error ? err.message : "Unknown error occurred";
         const isNetworkError =
-            message.includes("Failed to fetch") ||
-            message.includes("NetworkError");
+            message.includes("Failed to fetch") || message.includes("NetworkError");
 
         return {
             type: "REPLY_ERROR",

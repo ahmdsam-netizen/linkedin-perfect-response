@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { getUserProfile, getDefaultUserProfile } from "../../shared/storage.ts";
-import type { CommunicationStyle, ConversationContext, ReplyOption, UserProfile } from "../../shared/types.ts";
+import type { CommunicationStyle, ConversationContext, MemoryContextInfo, ReplyOption, UserProfile } from "../../shared/types.ts";
 import type {
     ContentToBackgroundMessage,
     BackgroundToContentMessage,
@@ -47,20 +47,59 @@ export function ReplyGenerator() {
 
     const [activeTabConnected, setActiveTabConnected] = useState(false);
     const [recipientHeadline, setRecipientHeadline] = useState<string | null>(null);
-
     const [recipientUrl, setRecipientUrl] = useState("");
 
     const [generating, setGenerating] = useState(false);
     const [generatedReply, setGeneratedReply] = useState("");
     const [replyOptions, setReplyOptions] = useState<ReplyOption[]>([]);
     const [activeOptionIndex, setActiveOptionIndex] = useState(0);
+    const [memoryContext, setMemoryContext] = useState<MemoryContextInfo | null>(null);
 
     const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
+
+    const checkActiveConversation = useCallback(async () => {
+        try {
+            // 1. Check storage for the last active conversation context clicked via injected button
+            const res = await chrome.storage.local.get("activeConversationContext");
+            if (res.activeConversationContext) {
+                const ctx = res.activeConversationContext as ConversationContext;
+                if (ctx.recipient?.name && ctx.recipient.name !== "Unknown" && ctx.recipient.name !== "Recipient") {
+                    setContext(ctx);
+                    setRecipientName(ctx.recipient.name);
+                    setActiveTabConnected(true);
+                    if (ctx.recipient.headline) setRecipientHeadline(ctx.recipient.headline);
+                    if (ctx.recipient.profileUrl) setRecipientUrl(ctx.recipient.profileUrl);
+                }
+            }
+
+            // 2. Query active tab and check if on LinkedIn message thread
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const tab = tabs[0];
+            if (tab?.id && tab.url?.includes("linkedin.com")) {
+                const message: PopupToContentMessage = { type: "EXTRACT_ACTIVE_CONVERSATION" };
+                const response = (await chrome.tabs.sendMessage(tab.id, message).catch(() => null)) as ContentToPopupMessage | null;
+                
+                if (response?.type === "CONVERSATION_EXTRACTED" && response.payload) {
+                    const ctx = response.payload;
+                    if (ctx.recipient?.name && ctx.recipient.name !== "Unknown" && ctx.recipient.name !== "Recipient") {
+                        setContext(ctx);
+                        setRecipientName(ctx.recipient.name);
+                        setActiveTabConnected(true);
+                        if (ctx.recipient.headline) setRecipientHeadline(ctx.recipient.headline);
+                        if (ctx.recipient.profileUrl) setRecipientUrl(ctx.recipient.profileUrl);
+                        return;
+                    }
+                }
+            }
+        } catch {
+            // Not connected to active conversation
+        }
+    }, []);
 
     useEffect(() => {
         let isMounted = true;
 
-        // 1. Load user profile for default sender name
+        // Load user profile for default sender name
         getUserProfile().then((stored) => {
             if (isMounted && stored) {
                 setUserProfile(stored);
@@ -68,58 +107,25 @@ export function ReplyGenerator() {
             }
         });
 
-        // 2. Check storage for the last active conversation context clicked
-        chrome.storage.local.get("activeConversationContext").then((res) => {
-            if (isMounted && res.activeConversationContext) {
-                const ctx = res.activeConversationContext as ConversationContext;
-                setContext(ctx);
-                if (ctx.recipient?.name && ctx.recipient.name !== "Unknown") {
-                    setRecipientName(ctx.recipient.name);
-                    setActiveTabConnected(true);
-                    if (ctx.recipient.headline) {
-                        setRecipientHeadline(ctx.recipient.headline);
-                    }
-                    if (ctx.recipient.profileUrl) {
-                        setRecipientUrl(ctx.recipient.profileUrl);
-                    }
-                }
-            }
-        });
-
-        // 3. Query active tab and auto-extract active conversation as live sync
-        chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-            const tab = tabs[0];
-            if (isMounted && tab?.id && tab.url?.includes("linkedin.com")) {
-                const message: PopupToContentMessage = { type: "EXTRACT_ACTIVE_CONVERSATION" };
-                chrome.tabs.sendMessage(tab.id, message).then((response: ContentToPopupMessage) => {
-                    if (isMounted && response?.type === "CONVERSATION_EXTRACTED" && response.payload) {
-                        const ctx = response.payload;
-                        setContext(ctx);
-                        if (ctx.recipient?.name && ctx.recipient.name !== "Unknown") {
-                            setRecipientName(ctx.recipient.name);
-                            setActiveTabConnected(true);
-                            if (ctx.recipient.headline) {
-                                setRecipientHeadline(ctx.recipient.headline);
-                            }
-                            if (ctx.recipient.profileUrl) {
-                                setRecipientUrl(ctx.recipient.profileUrl);
-                            }
-                        }
-                    }
-                }).catch(() => {
-                    // Content script not loaded or not on active chat
-                });
-            }
-        });
+        checkActiveConversation();
 
         return () => {
             isMounted = false;
         };
-    }, []);
+    }, [checkActiveConversation]);
 
     async function handleGenerate() {
+        if (!activeTabConnected || !recipientName.trim() || recipientName.trim() === "Recipient") {
+            setStatusMessage({
+                type: "error",
+                text: "⚠️ Please open a LinkedIn message conversation with someone first to generate replies.",
+            });
+            return;
+        }
+
         setGenerating(true);
         setStatusMessage(null);
+        setMemoryContext(null);
 
         try {
             const latestProfile = (await getUserProfile()) || userProfile;
@@ -132,25 +138,39 @@ export function ReplyGenerator() {
                 messages: [],
             };
 
-            const payload = {
-                context: {
-                    ...activeContext,
-                    recipient: {
-                        ...activeContext.recipient,
-                        name: recipientName.trim() || activeContext.recipient.name,
-                        profileUrl: recipientUrl.trim() || activeContext.recipient.profileUrl,
-                    },
+            // Derive conversation ID from URL or contact name
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const currentTabUrl = tabs[0]?.url || "";
+            const threadMatch = currentTabUrl.match(/\/messaging\/thread\/([^/?#]+)/i);
+            const rawConvoId = threadMatch ? threadMatch[1] : `convo-${recipientName.toLowerCase().replace(/\s+/g, "-") || "default"}`;
+
+            const syncPayload = {
+                user: {
+                    linkedinId: (myName || latestProfile.name || "user").toLowerCase().replace(/\s+/g, "-"),
+                    name: myName.trim() || latestProfile.name || "LinkedIn User",
                 },
-                myName: myName.trim() || latestProfile.name || "LinkedIn User",
-                recipientName: recipientName.trim() || activeContext.recipient.name,
-                relationship,
-                style,
-                userPrompt: promptText.trim(),
+                contact: {
+                    linkedinProfileId: recipientUrl ? (recipientUrl.match(/\/in\/([^/?#]+)/i)?.[1] ?? recipientName.toLowerCase().replace(/\s+/g, "-")) : recipientName.toLowerCase().replace(/\s+/g, "-"),
+                    name: recipientName.trim() || "Recipient",
+                    headline: recipientHeadline || undefined,
+                },
+                conversation: {
+                    linkedinConversationId: rawConvoId,
+                },
+                messages: (activeContext.messages || []).map((m) => ({
+                    senderType: (m.sender === "me" ? "USER" : "CONTACT") as "USER" | "CONTACT",
+                    content: m.text,
+                })),
             };
 
             const message: ContentToBackgroundMessage = {
-                type: "GENERATE_REPLY",
-                payload,
+                type: "SYNC_AND_GENERATE_REPLY",
+                payload: {
+                    syncPayload,
+                    instruction: promptText.trim() || undefined,
+                    tone: style,
+                    style,
+                },
             };
 
             const response = await chrome.runtime.sendMessage<
@@ -160,11 +180,14 @@ export function ReplyGenerator() {
 
             if (response && response.type === "REPLY_GENERATED") {
                 const opts = response.payload.replies || [
-                    { style: style || "professional", text: response.payload.text }
+                    { style: style || "professional", text: response.payload.reply }
                 ];
                 setReplyOptions(opts);
                 setActiveOptionIndex(0);
-                setGeneratedReply(opts[0]?.text || response.payload.text || "");
+                setGeneratedReply(opts[0]?.text || response.payload.reply || "");
+                if (response.payload.memoryContext) {
+                    setMemoryContext(response.payload.memoryContext);
+                }
             } else if (response && response.type === "REPLY_ERROR") {
                 setStatusMessage({ type: "error", text: response.error || "Failed to generate reply." });
             } else {
@@ -247,10 +270,73 @@ export function ReplyGenerator() {
                     <span className="chat-status-text">
                         {activeTabConnected
                             ? `Connected: ${recipientName}${recipientHeadline ? ` • ${recipientHeadline.slice(0, 40)}...` : ""}`
-                            : "Auto-detect: Open any LinkedIn message chat"}
+                            : "⚠️ No conversation open: Open any LinkedIn message chat"}
                     </span>
                 </div>
+                {!activeTabConnected && (
+                    <button
+                        type="button"
+                        onClick={checkActiveConversation}
+                        style={{
+                            background: "none",
+                            border: "none",
+                            color: "#0a66c2",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            padding: "2px 6px",
+                        }}
+                    >
+                        🔄 Refresh
+                    </button>
+                )}
             </div>
+
+            {/* Inactive Conversation Warning Card when not connected */}
+            {!activeTabConnected && (
+                <div style={{
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    background: "rgba(254, 243, 199, 0.9)",
+                    border: "1px solid rgba(245, 158, 11, 0.4)",
+                    color: "#92400e",
+                    fontSize: "11.5px",
+                    lineHeight: "1.4",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "8px",
+                }}>
+                    <span style={{ fontSize: "14px" }}>🔒</span>
+                    <div>
+                        <strong>Reply Generation Locked</strong>
+                        <div style={{ marginTop: "2px", opacity: 0.9 }}>
+                            Please navigate to an open conversation in <strong>LinkedIn Messaging</strong> with a connection to generate contextual AI replies.
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Memory Context Badge */}
+            {memoryContext && (
+                <div style={{
+                    fontSize: "11px",
+                    color: "rgba(255,255,255,0.85)",
+                    padding: "6px 12px",
+                    borderRadius: "8px",
+                    background: "rgba(10, 102, 194, 0.25)",
+                    border: "1px solid rgba(10, 102, 194, 0.4)",
+                    marginBottom: "10px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                }}>
+                    <span>💡</span>
+                    <span>
+                        Memory Active: {memoryContext.factsRetrieved} fact{memoryContext.factsRetrieved !== 1 ? "s" : ""} recalled
+                        {memoryContext.summaryUsed ? " · Conversation history active" : ""}
+                    </span>
+                </div>
+            )}
 
             {/* Status alerts */}
             {statusMessage && (
@@ -276,9 +362,10 @@ export function ReplyGenerator() {
                     <input
                         id="input-recip-name"
                         type="text"
-                        placeholder="Other User Name"
+                        placeholder="Auto-detected from active chat"
                         value={recipientName}
                         onChange={(e) => setRecipientName(e.target.value)}
+                        disabled={!activeTabConnected}
                     />
                 </div>
             </div>
@@ -292,6 +379,7 @@ export function ReplyGenerator() {
                     placeholder="https://www.linkedin.com/in/username/"
                     value={recipientUrl}
                     onChange={(e) => setRecipientUrl(e.target.value)}
+                    disabled={!activeTabConnected}
                 />
             </div>
 
@@ -339,6 +427,7 @@ export function ReplyGenerator() {
                     placeholder="e.g. Congratulate them on the role, mention our mutual project, and ask for a 15-min call next week..."
                     value={promptText}
                     onChange={(e) => setPromptText(e.target.value)}
+                    disabled={!activeTabConnected}
                 />
                 <div className="prompt-suggestion-chips">
                     {PROMPT_SUGGESTIONS.map((ps) => (
@@ -347,6 +436,7 @@ export function ReplyGenerator() {
                             key={ps.label}
                             className="prompt-chip"
                             onClick={() => applyPromptSuggestion(ps.text)}
+                            disabled={!activeTabConnected}
                         >
                             {ps.label}
                         </button>
@@ -354,14 +444,24 @@ export function ReplyGenerator() {
                 </div>
             </div>
 
-            {/* Generate Action */}
+            {/* Generate Action - Strictly requires active conversation */}
             <button
                 type="button"
                 className="btn-generate-main"
                 onClick={handleGenerate}
-                disabled={generating}
+                disabled={generating || !activeTabConnected}
+                style={!activeTabConnected ? {
+                    opacity: 0.55,
+                    cursor: "not-allowed",
+                    background: "rgba(100, 116, 139, 0.6)",
+                    boxShadow: "none",
+                } : undefined}
             >
-                {generating ? "⏳ Generating Replies..." : "✨ Generate Reply Options"}
+                {generating
+                    ? "⏳ Generating Replies..."
+                    : activeTabConnected
+                        ? "✨ Generate Reply Options"
+                        : "🔒 Open a Conversation to Generate Reply"}
             </button>
 
             {/* Generated Reply Box */}
@@ -388,7 +488,7 @@ export function ReplyGenerator() {
                         <span className="reply-preview-label">
                             📝 {styleLabels[replyOptions[activeOptionIndex]?.style] || replyOptions[activeOptionIndex]?.style || "Generated"} Reply Preview
                         </span>
-                        <button type="button" className="btn-mini-regen" onClick={handleGenerate} disabled={generating}>
+                        <button type="button" className="btn-mini-regen" onClick={handleGenerate} disabled={generating || !activeTabConnected}>
                             🔄 Regenerate
                         </button>
                     </div>

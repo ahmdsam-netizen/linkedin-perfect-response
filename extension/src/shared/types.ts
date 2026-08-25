@@ -1,6 +1,6 @@
 /**
  * shared/types.ts
- * Core type definitions shared across content script, popup, and background.
+ * Core type definitions for LinkedIn AI Reply Extension.
  */
 
 // ─── LinkedIn Data ───────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ export interface ConversationContext {
     messages: Message[];
 }
 
-// ─── User Configuration ──────────────────────────────────────────────────────
+// ─── User Profile ────────────────────────────────────────────────────────────
 
 export type CommunicationStyle =
     | "professional"
@@ -47,16 +47,45 @@ export interface UserProfile {
     style?: CommunicationStyle;
 }
 
-// ─── API ─────────────────────────────────────────────────────────────────────
+// ─── Sync & Memory API DTOs ──────────────────────────────────────────────────
+
+export interface SyncMessagePayload {
+    senderType: "USER" | "CONTACT";
+    content: string;
+}
+
+export interface SyncPayload {
+    user: {
+        linkedinId: string;
+        name: string;
+    };
+    contact: {
+        linkedinProfileId: string;
+        name: string;
+        headline?: string;
+    };
+    conversation: {
+        linkedinConversationId: string;
+    };
+    messages: SyncMessagePayload[];
+}
+
+export interface SyncResponse {
+    conversationId: string;
+    newMessagesCount: number;
+    userId: string;
+    contactId: string;
+}
 
 export interface GenerateReplyRequest {
-    context: ConversationContext;
-    userProfile: UserProfile;
-    myName?: string;
-    recipientName?: string;
+    conversationId: string;
+    userName?: string;
+    userRole?: string;
+    contactName?: string;
+    contactHeadline?: string;
     relationship?: string;
-    style?: CommunicationStyle;
-    userPrompt?: string;
+    instruction?: string;
+    tone?: string;
 }
 
 export interface ReplyOption {
@@ -64,13 +93,14 @@ export interface ReplyOption {
     text: string;
 }
 
-export interface GeneratedReply {
-    text: string;
-    replies?: ReplyOption[];
-    confidence?: number;
+export interface MemoryContextInfo {
+    summaryUsed: boolean;
+    factsRetrieved: number;
+    recentMessagesUsed: number;
 }
 
-export interface ApiError {
-    message: string;
-    code?: string;
+export interface GeneratedReplyResponse {
+    reply: string;
+    replies: ReplyOption[];
+    memoryContext?: MemoryContextInfo;
 }

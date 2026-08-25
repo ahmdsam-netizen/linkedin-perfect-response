@@ -1,26 +1,27 @@
 /**
  * shared/messages.ts
- * Typed message contracts for chrome.runtime messaging.
- * All extension communication MUST use these types - no raw strings.
+ * Strongly-typed message contracts for chrome.runtime messaging.
  */
 
-import type { CommunicationStyle, ConversationContext, GeneratedReply, UserProfile } from "./types.ts";
+import type {
+    CommunicationStyle,
+    ConversationContext,
+    GeneratedReplyResponse,
+    SyncPayload,
+    UserProfile,
+} from "./types.ts";
 
-export interface GenerateReplyPayload {
-    context: ConversationContext;
-    myName?: string;
-    recipientName?: string;
-    relationship?: string;
-    style?: CommunicationStyle;
-    userPrompt?: string;
-}
-
-// Outbound (content/popup -> background)
+// ── Outbound: Content/Popup -> Background ─────────────────────────────────────
 
 export type ContentToBackgroundMessage =
     | {
-          type: "GENERATE_REPLY";
-          payload: GenerateReplyPayload;
+          type: "SYNC_AND_GENERATE_REPLY";
+          payload: {
+              syncPayload: SyncPayload;
+              instruction?: string;
+              tone?: string;
+              style?: CommunicationStyle;
+          };
       }
     | {
           type: "GET_USER_PROFILE";
@@ -36,12 +37,12 @@ export type ContentToBackgroundMessage =
           type: "OPEN_POPUP";
       };
 
-// Inbound (background -> content/popup)
+// ── Inbound: Background -> Content/Popup ──────────────────────────────────────
 
 export type BackgroundToContentMessage =
     | {
           type: "REPLY_GENERATED";
-          payload: GeneratedReply;
+          payload: GeneratedReplyResponse;
       }
     | {
           type: "REPLY_ERROR";
@@ -52,7 +53,7 @@ export type BackgroundToContentMessage =
           payload: UserProfile | null;
       };
 
-// Popup <-> Content messaging
+// ── Tab: Popup <-> Content ───────────────────────────────────────────────────
 
 export type PopupToContentMessage =
     | {
@@ -80,11 +81,10 @@ export type ContentToPopupMessage =
           success: boolean;
       };
 
-// Union (all directions)
+// ── Union ─────────────────────────────────────────────────────────────────────
 
 export type ExtensionMessage =
     | ContentToBackgroundMessage
     | BackgroundToContentMessage
     | PopupToContentMessage
     | ContentToPopupMessage;
-

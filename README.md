@@ -1,10 +1,22 @@
-# LinkedIn AI Reply — Chrome Extension & FastAPI Backend
+# LinkedIn AI Reply — Version 2.0
 
-A production-grade, two-pass AI assistant for LinkedIn messaging. The system consists of a **Manifest V3 Chrome Extension** (Vite + React + TypeScript) that automatically scrapes active LinkedIn conversation context and a **FastAPI + LangChain + Gemini Backend** that analyzes conversations and generates three distinct reply alternatives (Professional, Conversational, and Concise).
+A production-grade, persistent memory AI assistant for LinkedIn messaging. The system consists of a **Manifest V3 Chrome Extension** (Vite + React + TypeScript) that automatically scrapes active LinkedIn conversation context and a **FastAPI + LangChain + PostgreSQL (pgvector) + Google Gemini Backend** that maintains contact-scoped long-term memory, episodic micro-summary chunks, semantic fact retrieval (RAG), and generates three tailored reply alternatives (Professional, Conversational, and Concise).
 
 ---
 
-##  Architecture & Data Flow
+## 🚀 What's New in Version 2.0
+
+- **Persistent Contact Memory & pgvector RAG**: Uses PostgreSQL with `pgvector` (768-dim embeddings via `gemini-embedding-001` with Matryoshka truncation) for semantic recall of past facts, preferences, and commitments.
+- **Deterministic Heuristic Noise Filter**: Zero-token gatekeeper that filters out trivial acknowledgments, emojis, and filler phrases without invoking the LLM.
+- **Episodic Micro-Summary Chunks**: Bounded 1–3 sentence chronological summaries (max 70 words) instead of costly full-conversation re-summarization.
+- **Automated Fact Lifecycle & Supersession**: Detects and marks outdated or contradicted facts (`ACTIVE` → `SUPERSEDED`) automatically during memory extraction.
+- **Hybrid Working-Buffer & Dynamic Prompt Budgeting**: Partitions context into past summaries, recalled facts, and the immediate ongoing message buffer, keeping total LLM context strictly within ~550–650 tokens.
+- **Single-Pass RAG Reply Generation**: Streamlined from a 2-pass pipeline to a fast, single-pass generation yielding 3 distinct communication styles.
+- **Real-Time Memory Context Badging**: Chrome extension popup displays live indicators of memories retrieved, summaries used, and buffer sizes.
+
+---
+
+## 🏗️ Architecture & Data Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -12,121 +24,186 @@ A production-grade, two-pass AI assistant for LinkedIn messaging. The system con
 │                                                                                 │
 │   LinkedIn DOM Chat           Popup UI (React 18)       Background Worker       │
 │  ┌──────────────────┐        ┌───────────────────┐     ┌──────────────────┐     │
-│  │ Active Chat Box  │───────►│Style Tabs, Prompts│────►│ Message Handler  │     │
-│  │ Context Extractor│        │ & Reply Preview   │     │ & Profile Fetcher│     │
+│  │ Context & Convo  │───────►│Style Tabs, Prompts│────►│ Sync & Generate │     │
+│  │ ID Extractor     │        │ & Memory Badges   │     │ Orchestrator     │     │
 │  └──────────────────┘        └───────────────────┘     └─────────┬────────┘     │
 └──────────────────────────────────────────────────────────────────┼──────────────┘
                                                                    │
-                                                POST /api/v1/reply/generate
+                                                1. POST /api/v1/conversations/sync
+                                                2. POST /api/v1/reply/generate
                                                                    │
                                                                    ▼
-┌──────────────────────────────────────────────────────────────────-──────────────┐
+┌─────────────────────────────────────────────────────────────────────────────────┐
 │                            FASTAPI BACKEND (PYTHON 3.12)                        │
 │                                                                                 │
-│   FastAPI Route             Service Orchestrator          LangChain Chains      │
+│   FastAPI Routes             Services & Heuristics        LangChain Pipelines   │
 │  ┌──────────────────┐       ┌──────────────────────┐     ┌───────────────────┐  │
-│  │ app/api/routes   │──────►│ reply_service.py     │────►│ Pass 1: Analysis  │  │
-│  │  /reply/generate │       │                      │     │ Pass 2: Generation│  │
-│  └──────────────────┘       └──────────────────────┘     └─────────┬─────────┘  │
-└────────────────────────────────────────────────────────────────────┼────────────┘
-                                                                     |
-                                                                     ▼
-                                                           Google Gemini API
-                                                          (gemini-3.6-flash)
+│  │ /conversations   │──────►│ Memory Processor     │────►│ Memory Extraction │  │
+│  │ /reply/generate  │       │ Context Builder      │     │ Single-Pass RAG   │  │
+│  │ /memory          │       │ Retrieval Service    │     │ Reply Generation  │  │
+│  └──────────────────┘       └──────────┬───────────┘     └─────────┬─────────┘  │
+└────────────────────────────────────────┼───────────────────────────┼────────────┘
+                                         │                           │
+                                         ▼                           ▼
+                        ┌─────────────────────────────┐   ┌───────────────────────┐
+                        │   PostgreSQL 16 + pgvector  │   │   Google Gemini API   │
+                        │   - users       - messages  │   │   - gemini-2.5-flash  │
+                        │   - contacts    - summaries │   │   - gemini-embedding  │
+                        │   - convos      - memories  │   │     (768 dimensions)  │
+                        └─────────────────────────────┘   └───────────────────────┘
 ```
 
 ---
 
-##  Tech Stack
+## 🗄️ Database Schema (PostgreSQL + pgvector)
+
+Version 2 features 6 relational tables designed for strict contact-scoped memory isolation:
+
+1. **`users`**: Replying user identity (`id`, `linkedin_id`, `name`, `created_at`).
+2. **`contacts`**: People the user communicates with (`id`, `user_id`, `linkedin_profile_id`, `name`, `headline`, `created_at`).
+3. **`conversations`**: Thread state and processing pointers (`id`, `user_id`, `contact_id`, `linkedin_conversation_id`, `last_processed_message_id`, `timestamps`).
+4. **`messages`**: Raw chat transcript with SHA-256 deduplication (`id`, `conversation_id`, `sender_type`, `content`, `content_hash`, `created_at`).
+5. **`summary_chunks`**: Bounded 1–3 sentence episodic summaries (`id`, `conversation_id`, `chunk_index`, `summary_chunk`, `created_at`).
+6. **`memories`**: Contact-scoped long-term semantic facts (`id`, `user_id`, `contact_id`, `content`, `memory_type`, `status` [ACTIVE/SUPERSEDED], `embedding` [VECTOR(768)], `created_at`).
+
+---
+
+## 🛠️ Tech Stack
 
 ### Frontend (Chrome Extension)
 - **Framework**: React 18, TypeScript, Vite
 - **Manifest Version**: Chrome Extension Manifest V3
-- **Styling**: CSS Modules / Custom Responsive Extension Theme
-- **Messaging**: `chrome.runtime` async messaging pipeline
+- **Styling**: CSS Modules / Dark Modern Extension UI
+- **Messaging**: `chrome.runtime` and `chrome.tabs` async messaging pipeline
+- **Storage**: `chrome.storage.local` for user profiles and cache
 
 ### Backend (Python Service)
-- **Language**: Python 3.12
+- **Language**: Python 3.12+
 - **Web Framework**: FastAPI, Uvicorn
+- **Database ORM**: SQLAlchemy 2.0 (Async), `asyncpg`, `pgvector-python`
 - **AI Framework**: LangChain, `langchain-google-genai`
-- **LLM Provider**: Google Gemini API (`gemini-3.6-flash`)
+- **LLM & Embeddings**: Google Gemini (`gemini-2.5-flash` / `gemini-3.6-flash`, `gemini-embedding-001`)
 - **Settings & Validation**: Pydantic v2, Pydantic Settings
-- **Testing**: Pytest, Pytest-Asyncio, HTTPX
+- **Testing**: Pytest, Pytest-Asyncio, greenlet, HTTPX
+
+### Infrastructure & Vector Storage
+- **Database**: PostgreSQL 16 with `pgvector` extension enabled
+- **Containerization**: Docker Compose (`pgvector/pgvector:pg16`)
 
 ---
 
-##  Repository Structure
+## 📁 Repository Structure
 
 ```
 linkedin-reply-extension/
 ├── README.md                      # Root documentation (this file)
+├── docker-compose.yml             # PostgreSQL 16 + pgvector container configuration
 │
-├── backend/                       # FastAPI AI Service
+├── backend/                       # FastAPI AI & Persistent Memory Service
 │   ├── app/
-│   │   ├── main.py                # FastAPI app initialization & CORS setup
+│   │   ├── main.py                # FastAPI app initialization, DB lifespan & routers
 │   │   ├── api/
 │   │   │   └── routes/
-│   │   │       └── reply.py       # POST /api/v1/reply/generate route
+│   │   │       ├── conversations.py # POST /api/v1/conversations/sync
+│   │   │       ├── memory.py        # GET /summary-chunks, /memories, POST /memory/process
+│   │   │       └── reply.py         # POST /api/v1/reply/generate
 │   │   ├── ai/
-│   │   │   ├── llm.py             # Gemini model factory (get_llm)
-│   │   │   ├── output_models.py   # Structured output Pydantic schemas
-│   │   │   ├── prompts.py         # LangChain ChatPromptTemplates
-│   │   │   └── chains.py          # LangChain analysis & generation chains
+│   │   │   ├── llm.py             # Gemini model & embedding factories
+│   │   │   ├── output_models.py   # Structured output schemas (Pydantic)
+│   │   │   ├── prompts.py         # Instruction-tuned LangChain ChatPromptTemplates
+│   │   │   └── chains.py          # Memory extraction & reply generation chains
+│   │   ├── db/
+│   │   │   ├── database.py        # Async SQLAlchemy engine & session factory
+│   │   │   ├── init_db.py         # DDL initialization (pgvector extension & tables)
+│   │   │   └── models.py          # SQLAlchemy 2.0 async ORM models (6 tables)
 │   │   ├── schemas/
-│   │   │   ├── request.py         # GenerateReplyRequest schema (camelCase aliases)
-│   │   │   ├── conversation.py    # Conversation domain models
-│   │   │   └── response.py        # GenerateReplyResponse schema
+│   │   │   ├── request.py         # SyncRequest & GenerateReplyRequest (camelCase aliases)
+│   │   │   ├── response.py        # SyncResponse & GenerateReplyResponse
+│   │   │   └── memory.py          # Memory inspection DTO schemas
 │   │   ├── services/
-│   │   │   ├── conversation_service.py # Conversation analysis logic
-│   │   │   ├── context_service.py      # Context engineering logic
-│   │   │   └── reply_service.py        # Pipeline orchestration
+│   │   │   ├── user_service.py         # User identity upsert logic
+│   │   │   ├── contact_service.py      # Contact profile upsert logic
+│   │   │   ├── conversation_service.py # Conversation thread upsert logic
+│   │   │   ├── message_service.py      # SHA-256 deduplicated message batching
+│   │   │   ├── memory_service.py       # Memory fact CRUD & supersession
+│   │   │   ├── memory_processor.py     # Lazy background memory processing orchestrator
+│   │   │   ├── summary_chunk_service.py# Episodic micro-summary management
+│   │   │   ├── embedding_service.py    # 768-dim Gemini Matryoshka embeddings
+│   │   │   ├── retrieval_service.py    # Contact-scoped pgvector cosine similarity RAG
+│   │   │   ├── context_builder.py      # Token-budgeted partitioned context assembler
+│   │   │   └── reply_service.py        # RAG pipeline orchestration
 │   │   └── core/
-│   │       └── config.py          # Pydantic BaseSettings (.env loader)
-│   ├── tests/                     # 16 unit & integration tests
-│   │   ├── conftest.py            # Shared fixtures & mock LLM
-│   │   ├── test_health.py         # Health check tests
-│   │   ├── test_schemas.py        # Request validation tests
-│   │   └── test_reply.py          # End-to-end service tests
-│   ├── .env.example               # Environment template
+│   │       ├── config.py          # Pydantic BaseSettings (.env loader)
+│   │       └── heuristics.py      # 0-token deterministic noise filter
+│   ├── tests/
+│   │   ├── conftest.py            # Async test fixtures and mock settings
+│   │   ├── test_health.py         # Server liveness tests
+│   │   └── v2/                    # V2 Memory, Heuristics, Isolation & RAG tests
+│   │       ├── test_heuristics.py
+│   │       ├── test_memory_isolation.py
+│   │       ├── test_fact_lifecycle.py
+│   │       ├── test_summary_chunks.py
+│   │       └── test_reply_generation.py
+│   ├── .env.example               # Environment variables template
 │   ├── requirements.txt           # Python dependencies
 │   └── README.md                  # Backend-specific documentation
 │
 └── extension/                     # Manifest V3 Chrome Extension
     ├── src/
     │   ├── background/
-    │   │   └── service_worker.ts  # Background worker & API proxy
+    │   │   └── service_worker.ts  # Two-step sync & generate API orchestration
     │   ├── content/
-    │   │   ├── content.ts         # Content script entry point
-    │   │   ├── linkedin/          # DOM selectors, scraper, composer insertion
-    │   │   └── ui/                # Injected '✨ Generate Reply' button
-    │   ├── popup/                 # React Popup UI
+    │   │   ├── content.ts         # Content script orchestrator
+    │   │   ├── linkedin/
+    │   │   │   ├── conversation.ts     # DOM scraper for active messages & profiles
+    │   │   │   ├── conversationId.ts   # 3-level fallback thread ID extractor
+    │   │   │   ├── composer.ts         # LinkedIn RichText editor autotyper
+    │   │   │   └── selectors.ts        # Resilient LinkedIn DOM selectors
+    │   │   └── ui/
+    │   │       └── replyButton.ts      # Injected '✨ Generate Reply' button
+    │   ├── popup/
+    │   │   ├── App.tsx            # Popup container & navigation
     │   │   └── components/
-    │   │       └── ReplyGenerator.tsx # Interactive reply generator with style tabs
-    │   └── shared/                # Shared TypeScript types & message contracts
-    ├── manifest.json              # Extension manifest
+    │   │       ├── ReplyGenerator.tsx  # Reply UI with style tabs & memory badges
+    │   │       └── ProfileSettings.tsx # User persona & style configuration
+    │   └── shared/                # Shared TypeScript message contracts & DTOs
+    ├── manifest.json              # Chrome Manifest V3 configuration
     ├── vite.config.ts             # Vite build configuration
     └── package.json               # Frontend dependencies
 ```
 
 ---
 
-##  Quickstart Guide
+## ⚡ Quickstart Guide
 
 ### 1. Prerequisites
-- **Python**: `3.12` installed (`python3.12 --version`)
+- **Python**: `3.12+` installed
 - **Node.js**: `v18+` and `npm` installed
+- **Docker**: Docker & Docker Compose installed (for PostgreSQL + `pgvector`)
 - **Gemini API Key**: Obtain a free API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
 
 ---
 
-### 2. Backend Setup & Startup
+### 2. Start PostgreSQL with pgvector
+
+In the root directory, start the vector database using Docker Compose:
+
+```bash
+docker compose up -d
+```
+
+This starts PostgreSQL 16 on port `5432` with the `pgvector` extension pre-installed.
+
+---
+
+### 3. Backend Setup & Startup
 
 1. **Navigate to the backend directory**:
    ```bash
    cd backend
    ```
 
-2. **Create and activate a Python 3.12 virtual environment**:
+2. **Create and activate a Python 3.12+ virtual environment**:
    ```bash
    python3.12 -m venv venv
    source venv/bin/activate       # On macOS/Linux
@@ -139,22 +216,29 @@ linkedin-reply-extension/
    ```
 
 4. **Configure environment variables**:
-   Create a `.env` file inside `backend/`:
    ```bash
    cp .env.example .env
    ```
-   Edit `.env` and set your Google Gemini API key:
+   Edit `.env` and set your configuration:
    ```env
    GEMINI_API_KEY=AIzaSy_your_actual_gemini_api_key
-   GEMINI_MODEL=gemini-3.6-flash
+   DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/linkedin_reply
+   GEMINI_MODEL=gemini-2.5-flash
+   GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+   EMBEDDING_DIMENSIONS=768
+   MEMORY_PROCESS_THRESHOLD=10
+   RECENT_MESSAGES_COUNT=8
+   RETRIEVAL_TOP_K=3
+   RETRIEVAL_THRESHOLD=0.30
    ```
 
 5. **Start the FastAPI server**:
    ```bash
    uvicorn app.main:app --reload
    ```
-   The backend runs at: `http://localhost:8000`  
-   Interactive Swagger API docs available at: `http://localhost:8000/docs`
+   - API Server: `http://localhost:8000`
+   - Interactive Swagger Docs: `http://localhost:8000/docs`
+   - Healthcheck: `http://localhost:8000/health`
 
 6. **Run Backend Test Suite**:
    ```bash
@@ -163,14 +247,14 @@ linkedin-reply-extension/
 
 ---
 
-### 3. Chrome Extension Build & Installation
+### 4. Chrome Extension Build & Installation
 
-1. **Open a new terminal and navigate to the extension directory**:
+1. **Navigate to the extension directory**:
    ```bash
    cd extension
    ```
 
-2. **Install frontend dependencies**:
+2. **Install dependencies**:
    ```bash
    npm install
    ```
@@ -179,104 +263,141 @@ linkedin-reply-extension/
    ```bash
    npm run build
    ```
-   This generates the compiled extension in `extension/dist/`.
+   The compiled extension will be output in `extension/dist/`.
 
 4. **Load the extension into Google Chrome**:
-   1. Open Google Chrome and navigate to `chrome://extensions`.
-   2. Enable **Developer mode** in the top right corner.
-   3. Click **Load unpacked** in the top left.
-   4. Select the `extension/dist/` directory inside your project folder.
+   1. Open Chrome and navigate to `chrome://extensions`.
+   2. Enable **Developer mode** (toggle in the top-right corner).
+   3. Click **Load unpacked** (top-left button).
+   4. Select the `extension/dist/` directory from this project.
 
 ---
 
-##  API Endpoints Reference
+## 📡 API Endpoints Reference
 
-### 1. `POST /api/v1/reply/generate` (also aliased as `/api/generate-reply`)
-Accepts scraped LinkedIn conversation context and returns three structured reply suggestions.
+### 1. `POST /api/v1/conversations/sync`
+Synchronizes active LinkedIn messages and contact metadata. Upserts user, contact, and conversation, and batch-inserts new messages with SHA-256 hash deduplication.
 
-**Request Payload Example**:
+**Request Payload**:
 ```json
 {
-  "context": {
-    "recipient": {
-      "name": "Sam Chen",
-      "headline": "Senior Software Engineer",
-      "company": "Acme Corp",
-      "position": "Senior Software Engineer"
+  "user": {
+    "linkedinId": "john-doe-123",
+    "name": "John Doe"
+  },
+  "contact": {
+    "linkedinProfileId": "sam-chen-456",
+    "name": "Sam Chen",
+    "headline": "Senior Staff Engineer at Acme"
+  },
+  "conversation": {
+    "linkedinConversationId": "2-MzQ5OTAxMTI="
+  },
+  "messages": [
+    {
+      "senderType": "CONTACT",
+      "content": "Are you using Redis Pub/Sub or Kafka for your event bus?"
     },
-    "messages": [
-      {
-        "sender": "them",
-        "text": "How are you handling communication between your servers?",
-        "timestamp": "10:00 AM"
-      },
-      {
-        "sender": "me",
-        "text": "I'm using Redis Pub/Sub.",
-        "timestamp": "10:05 AM"
-      },
-      {
-        "sender": "them",
-        "text": "Have you considered Kafka?",
-        "timestamp": "10:07 AM"
-      }
-    ]
-  },
-  "userProfile": {
-    "name": "John Doe",
-    "role": "Backend Engineer",
-    "skills": ["Python", "Kafka", "Redis"],
-    "background": "5 years of experience in distributed systems.",
-    "style": "professional"
-  },
-  "myName": "John",
-  "recipientName": "Sam",
-  "relationship": "Connection",
-  "userPrompt": "Share my experience with Kafka and offer to chat."
+    {
+      "senderType": "USER",
+      "content": "We started with Redis Pub/Sub but recently migrated to Kafka for durability."
+    },
+    {
+      "senderType": "CONTACT",
+      "content": "How was the migration experience regarding partition rebalancing?"
+    }
+  ]
 }
 ```
 
-**Response Payload Example**:
+**Response Payload**:
 ```json
 {
-  "reply": "Kafka is definitely worth evaluating for your use case. It provides durable message storage and replay capabilities that Redis Pub/Sub doesn't offer.",
+  "conversationId": "b18b4e78-4395-4eb8-b998-ef2ec1b97b0a",
+  "newMessagesCount": 3,
+  "userId": "d7426189-7cf3-40f4-bd0b-a0cae0e29fa2",
+  "contactId": "97e4ce99-f2e1-4560-bf6c-db73d528b7e2"
+}
+```
+
+---
+
+### 2. `POST /api/v1/reply/generate`
+Generates 3 contextual reply suggestions using contact-scoped semantic facts, recent micro-summary chunks, and recent messages.
+
+**Request Payload**:
+```json
+{
+  "conversationId": "b18b4e78-4395-4eb8-b998-ef2ec1b97b0a",
+  "userName": "John Doe",
+  "userRole": "Lead Backend Engineer",
+  "contactName": "Sam Chen",
+  "contactHeadline": "Senior Staff Engineer at Acme",
+  "relationship": "Colleague",
+  "instruction": "Explain our consumer group configuration and offer to share rebalance listener snippets.",
+  "tone": "professional"
+}
+```
+
+**Response Payload**:
+```json
+{
+  "reply": "The partition rebalancing was straightforward once we configured cooperative sticky assignors...",
   "replies": [
     {
       "style": "professional",
-      "text": "Kafka is definitely worth evaluating for your use case. It provides durable message storage and replay capabilities that Redis Pub/Sub doesn't offer. Happy to share some benchmarks from our migration if useful."
+      "text": "The partition rebalancing was straightforward once we configured cooperative sticky assignors. It prevented the stop-the-world rebalance pauses we were worried about. Happy to share our consumer config snippets if that helps."
     },
     {
       "style": "conversational",
-      "text": "Yeah, Kafka crossed my mind too when we were on Redis. Made the switch about a year ago — huge difference for high-throughput workloads. What kind of message volume are you dealing with?"
+      "text": "We ran into some choppy rebalances early on, but switching to the CooperativeStickyAssignor smoothed everything out. Let me know if you want to see our listener config!"
     },
     {
       "style": "concise",
-      "text": "Kafka makes sense if you need replay or stronger delivery guarantees. What's your current message volume?"
+      "text": "Cooperative sticky assignors eliminated our rebalance spikes. Happy to send over our consumer configuration."
     }
   ],
-  "analysis": {
-    "main_topic": "Distributed systems communication",
-    "tone": "technical and conversational",
-    "conversation_stage": "technical discussion",
-    "last_message_intent": "asking for a technical opinion"
+  "memoryContext": {
+    "summaryUsed": true,
+    "factsRetrieved": 2,
+    "recentMessagesUsed": 3
   }
 }
 ```
 
-### 2. `GET /health`
-Health check endpoint to verify backend liveness. Returns `{"status": "ok"}`.
+---
+
+### 3. Memory & Inspection Endpoints
+
+- **`GET /api/v1/conversations/{conversation_id}/summary-chunks`**: Returns all episodic micro-summary chunks in chronological order.
+- **`GET /api/v1/conversations/{conversation_id}/memories`**: Returns all active and superseded memory facts for the contact.
+- **`POST /api/v1/memory/process`**: Manually forces memory extraction and fact supersession on unprocessed messages.
+- **`GET /health`**: Server liveness and version check (`{"status": "ok", "version": "2.0.0"}`).
 
 ---
 
-##  Features & Highlights
+## 🧠 Core V2 Engineering Innovations
 
-- **Two-Pass AI Pipeline**:
-  - **Pass 1 (Analysis)**: Gemini analyzes conversation topics, tone, stage, key facts, open questions, and last message intent.
-  - **Pass 2 (Generation)**: Context engineering combines user profile, recipient profile, relationship, conversation history, analysis, and custom prompt to produce 3 distinct replies.
-- **Interactive Multi-Style Tabs**:
-  - The Chrome extension popup displays 3 clickable tabs (` Professional`, ` Conversational`, ` Concise`). Switch options with 1 click.
-- **Smart DOM Insertion**:
-  - Inserts directly into LinkedIn's React Rich Text Editor (`div.msg-form__contenteditable`), preserving inner paragraph formatting and firing synthetic `beforeinput`, `input`, and `change` events so LinkedIn's **Send button** is automatically enabled.
-- **Robust Error Handling & CORS**:
-  - Safe 502 error mapping for Gemini API issues (never leaks secrets or stack traces to client).
-  - Explicit CORS configuration for localhost origins and Chrome extension extensions.
+### 1. Deterministic Heuristic Noise Filter (0 Tokens)
+Before sending unprocessed messages to Gemini, a zero-cost heuristic gate inspects the batch. Trivial messages (e.g. *"ok"*, *"thanks!"*, *"sounds good"*, emojis, short filler) are filtered out. If an entire batch is trivial, the processing pointer advances with **0 LLM tokens consumed**.
+
+### 2. Episodic Micro-Summary Chunks
+Instead of re-summarizing growing conversations from scratch, Version 2 generates compact 1–3 sentence chunks (max 70 words) representing delta progress since the last slice. Summary chunks are sequentially indexed (`chunk_index`), allowing bounded retrieval.
+
+### 3. Automated Fact Lifecycle & Supersession
+Extracted facts are tagged with types (`PROJECT`, `ROLE`, `PREFERENCE`, `EVENT`, `COMMITMENT`). When new messages contradict or update an existing fact (e.g. *"I moved from Google to OpenAI"*), the previous fact is marked `SUPERSEDED` and excluded from subsequent semantic searches.
+
+### 4. Dynamic Prompt Budgeting
+To guarantee fast responses and prevent prompt bloat, context is strictly partitioned:
+- **Past Conversation History**: 1 summary chunk (~35 tokens) when the immediate buffer is large, or 2 chunks (~70 tokens) when the buffer is small.
+- **Recalled Facts**: Top-3 semantically relevant facts via pgvector cosine similarity (`<=>`).
+- **Immediate Ongoing Exchange**: Up to 8 recent uncompressed messages (~200 tokens).
+- **Total context**: Fixed within ~550–650 tokens.
+
+---
+
+## 🛡️ Security & Privacy
+
+- **Contact Isolation**: All memory queries strictly filter by `user_id` and `contact_id` to prevent cross-contact data leakage.
+- **Sanitized Errors**: Upstream API failures and database errors are mapped to safe HTTP 502/500 codes; internal secrets and stack traces are never exposed.
+- **Safe Environment Storage**: API keys and database credentials are kept exclusively in `.env` (git-ignored) and managed via Pydantic BaseSettings.

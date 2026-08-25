@@ -76,15 +76,15 @@ function determineSender(
             return "me";
         }
 
-        // Compare with provided user name or default "Sayem"
-        const myTokens = (myName || "Sayem Ahmad").toLowerCase().split(/\s+/).filter((t) => t.length > 2);
-        if (myTokens.some((t) => lower.includes(t))) {
+        // Compare with provided user name (skip check if no name given — rely on CSS classes below)
+        const myTokens = (myName || "").toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+        if (myTokens.length > 0 && myTokens.some((t) => lower.includes(t))) {
             return "me";
         }
 
-        // Compare with recipient name
-        const recipTokens = (recipientName || "Abdul Rub Faheemi").toLowerCase().split(/\s+/).filter((t) => t.length > 2);
-        if (recipTokens.some((t) => lower.includes(t))) {
+        // Compare with recipient name (skip check if no name given — rely on CSS classes below)
+        const recipTokens = (recipientName || "").toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+        if (recipTokens.length > 0 && recipTokens.some((t) => lower.includes(t))) {
             return "them";
         }
     }
@@ -145,4 +145,20 @@ function extractCleanText(bubble: Element): string {
 function extractTimestamp(groupEl: Element): string | undefined {
     const timeEl = groupEl.querySelector("time, .msg-s-message-group__timestamp, .msg-s-event-listitem__time-stamp");
     return timeEl?.textContent?.trim() ?? undefined;
+}
+
+/**
+ * Best-effort extraction of data-event-urn / data-id attributes from message DOM elements.
+ * Returns a Map keyed by the first 50 characters of each message's text, valued by its URN.
+ * Used as deduplication hints when syncing messages with the V2 backend.
+ * May return an empty Map if no annotated elements are found.
+ */
+export function extractLinkedInMessageIds(): Map<string, string> {
+    const map = new Map<string, string>();
+    document.querySelectorAll<HTMLElement>("[data-event-urn], [data-id]").forEach((el) => {
+        const urn = el.getAttribute("data-event-urn") || el.getAttribute("data-id") || "";
+        const text = el.textContent?.trim() || "";
+        if (urn && text) map.set(text.substring(0, 50), urn);
+    });
+    return map;
 }

@@ -197,7 +197,9 @@ async function handleButtonClick(btn: HTMLButtonElement, form: HTMLElement): Pro
 
 export async function buildConversationContext(form?: HTMLElement | null): Promise<ConversationContext> {
     const recipient = await extractRecipient(form);
-    const messages = extractConversation(form, "Sayem Ahmad", recipient.name);
+    const stored = await chrome.storage.local.get("userProfile");
+    const myName: string = stored.userProfile?.name || "";
+    const messages = extractConversation(form, myName, recipient.name);
 
     return { recipient, messages };
 }

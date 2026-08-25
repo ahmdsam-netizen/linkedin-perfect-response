@@ -1,109 +1,89 @@
 """
 app/services/conversation_service.py
 =====================================
-Service responsible for analysing a LinkedIn conversation.
-
-Responsibilities:
-- Format the conversation into a text representation for the prompt.
-- Call the conversation analysis LangChain chain.
-- Return a structured ConversationAnalysis.
-
-This service has NO knowledge of HTTP requests or FastAPI.
+Find-or-create a Conversation and update its processing pointer.
 """
 
 import logging
 
-from app.ai.chains import run_conversation_analysis
-from app.ai.output_models import ConversationAnalysis
-from app.schemas.request import ConversationContext, LinkedInPerson, Message, UserProfile
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import Conversation
 
 logger = logging.getLogger(__name__)
 
 
-def _format_conversation_text(
-    messages: list[Message],
-    user_name: str,
-    recipient_name: str,
-) -> str:
-    """Render a list of messages into a readable conversation transcript.
+async def find_or_create_conversation(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    contact_id: str,
+    linkedin_conversation_id: str,
+) -> Conversation:
+    """Return an existing Conversation or create one if not found.
 
     Args:
-        messages: Chronological list of messages.
-        user_name: Display name for the user ('me' sender).
-        recipient_name: Display name for the recipient ('them' sender).
+        db: Active async database session.
+        user_id: Internal User.id.
+        contact_id: Internal Contact.id.
+        linkedin_conversation_id: LinkedIn thread identifier.
 
     Returns:
-        A multi-line string suitable for inclusion in a prompt.
+        The Conversation ORM object.
     """
-    lines: list[str] = []
-    for msg in messages:
-        name = user_name if msg.sender == "me" else recipient_name
-        timestamp_suffix = f" [{msg.timestamp}]" if msg.timestamp else ""
-        lines.append(f"{name}{timestamp_suffix}:\n{msg.text.strip()}")
-    return "\n\n".join(lines)
-
-
-def _format_recipient_headline(recipient: LinkedInPerson) -> str:
-    """Build a one-line description of the recipient for the prompt."""
-    parts: list[str] = []
-    if recipient.headline:
-        parts.append(recipient.headline)
-    if recipient.position and recipient.company:
-        parts.append(f"{recipient.position} at {recipient.company}")
-    elif recipient.position:
-        parts.append(recipient.position)
-    elif recipient.company:
-        parts.append(f"works at {recipient.company}")
-    return f" ({', '.join(parts)})" if parts else ""
-
-
-async def analyze_conversation(
-    context: ConversationContext,
-    user_profile: UserProfile,
-    user_name: str,
-    recipient_name: str,
-) -> ConversationAnalysis:
-    """Analyse a LinkedIn conversation using Gemini via LangChain.
-
-    Args:
-        context: The full conversation context from the request.
-        user_profile: The replying user's profile.
-        user_name: Resolved display name for the user.
-        recipient_name: Resolved display name for the recipient.
-
-    Returns:
-        A ConversationAnalysis with structured insights about the conversation.
-
-    Raises:
-        RuntimeError: If the LangChain chain fails or returns invalid output.
-    """
-    conversation_text = _format_conversation_text(
-        messages=context.messages,
-        user_name=user_name,
-        recipient_name=recipient_name,
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.user_id == user_id,
+            Conversation.linkedin_conversation_id == linkedin_conversation_id,
+        )
     )
-    recipient_headline = _format_recipient_headline(context.recipient)
+    conversation = result.scalar_one_or_none()
 
-    inputs = {
-        "user_name": user_name,
-        "user_role": user_profile.role or "Professional",
-        "recipient_name": recipient_name,
-        "recipient_headline": recipient_headline,
-        "conversation_text": conversation_text,
-    }
+    if conversation is not None:
+        return conversation
 
+    conversation = Conversation(
+        user_id=user_id,
+        contact_id=contact_id,
+        linkedin_conversation_id=linkedin_conversation_id,
+    )
+    db.add(conversation)
+    await db.flush()
     logger.info(
-        "Running conversation analysis | user=%s recipient=%s messages=%d",
-        user_name,
-        recipient_name,
-        len(context.messages),
+        "Created conversation: id=%s linkedin_id=%s",
+        conversation.id,
+        linkedin_conversation_id,
     )
+    return conversation
 
-    analysis = await run_conversation_analysis(inputs)
 
-    logger.info(
-        "Conversation analysis complete | topic=%s stage=%s",
-        analysis.main_topic,
-        analysis.conversation_stage,
+async def get_conversation_by_id(
+    db: AsyncSession,
+    conversation_id: str,
+) -> Conversation | None:
+    """Return a Conversation by its internal UUID."""
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
     )
-    return analysis
+    return result.scalar_one_or_none()
+
+
+async def update_processing_pointer(
+    db: AsyncSession,
+    *,
+    conversation_id: str,
+    last_processed_message_id: str,
+) -> None:
+    """Update last_processed_message_id after successful memory processing."""
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    )
+    conversation = result.scalar_one_or_none()
+    if conversation:
+        conversation.last_processed_message_id = last_processed_message_id
+        logger.debug(
+            "Updated processing pointer: conversation=%s message=%s",
+            conversation_id,
+            last_processed_message_id,
+        )

@@ -1,145 +1,102 @@
 """
 app/ai/prompts.py
 =================
-All LangChain prompt templates live here — nowhere else.
+Instruction-tuned LangChain prompt templates for Version 2.
 
-Keeping prompts in one place makes iteration easy without touching
-service or chain code.  Import the constants; do not instantiate templates
-inside service functions.
+Prompts:
+  - MEMORY_EXTRACTION_PROMPT: Unified micro-summary chunk and fact extraction (1 LLM call)
+  - REPLY_GENERATION_PROMPT: Single-pass RAG reply generation with Hybrid Working-Buffer & Past History
 """
 
 from langchain_core.prompts import ChatPromptTemplate
 
-# ── Prompt 1 — Conversation Analysis ─────────────────────────────────────────
-#
-# Purpose: deeply understand the conversation before generating any reply.
-# The model MUST NOT produce a reply here — analysis only.
-# Output is enforced as structured JSON via with_structured_output().
+# ── 1. Unified Memory Extraction (Micro-Summary + Facts + Supersession) ────────
 
-CONVERSATION_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages(
+MEMORY_EXTRACTION_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """You are an expert conversation analyst specialised in professional \
-LinkedIn messaging.
+            """Extract structured memory from a LinkedIn conversation slice.
 
-Your task is to analyse the conversation provided and extract structured \
-insights. You are NOT generating a reply — only analysing.
+TASKS:
+1. MICRO-SUMMARY: Write 1 – 3 sentences (max 70 words) covering the KEY topics \
+and outcomes of THIS message slice. Do NOT repeat what the previous summary \
+already covers.
+2. NEW FACTS: Extract only MEANINGFUL long-term facts: projects, job changes, \
+technologies, commitments, preferences, important events. Each fact must state \
+WHO said/did WHAT. Max 25 words per fact.
+3. SUPERSEDED FACTS: If any existing fact is now OUTDATED or CONTRADICTED by \
+the new messages, return its ID.
 
-Be precise and factual. Do not invent information that is not present in the \
-conversation. If something is unclear, reflect that uncertainty in your output \
-rather than guessing.
-
-Analyse the following aspects:
-1. The main topic of the conversation.
-2. Specific topics, technologies, or themes discussed.
-3. The overall tone of the conversation.
-4. The current stage of the conversation.
-5. Important facts, decisions, or positions explicitly stated.
-6. Open questions or unresolved topics.
-7. The intent behind the last message sent.""",
+SKIP: "ok", "thanks", "sure", emojis, greetings without content, trivial filler.
+If no meaningful facts exist, return an empty new_facts list.""",
         ),
         (
             "human",
-            """Here is the LinkedIn conversation to analyse:
+            """CONTACT: {contact_name}
+USER: {user_name}
 
-PARTICIPANTS
-- User (replying): {user_name} — {user_role}
-- Recipient: {recipient_name}{recipient_headline}
+PREVIOUS SUMMARY (do NOT repeat this in the micro-summary):
+{previous_summary}
 
-CONVERSATION
-{conversation_text}
+EXISTING ACTIVE FACTS (check for contradictions):
+{existing_facts}
 
-Analyse this conversation and return structured output.""",
+NEW MESSAGES TO PROCESS:
+{messages_text}
+
+Return the micro-summary, new facts, and any superseded fact IDs.""",
         ),
     ]
 )
 
-
-# ── Prompt 2 — Reply Generation ───────────────────────────────────────────────
-#
-# Purpose: generate three high-quality, human-sounding reply alternatives.
-# Receives the full context including the conversation analysis from Prompt 1.
-# Output is enforced as structured JSON via with_structured_output().
+# ── 2. Single-Pass RAG Reply Generation (Hybrid Buffer + History) ──────────────
 
 REPLY_GENERATION_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """You are an expert LinkedIn communication assistant. \
-You help professionals craft authentic, effective messages.
+            """You are a LinkedIn reply assistant. Generate THREE distinct reply \
+alternatives for the user.
 
-Your task is to generate exactly THREE reply alternatives for the user. \
-Each reply must be distinct in style:
-
-1. PROFESSIONAL — polished, structured, appropriate for formal business contexts.
-2. CONVERSATIONAL — warm, natural, like talking to a colleague you know well.
-3. CONCISE — short, direct, respects the recipient's time.
+STYLES:
+1. PROFESSIONAL — polished, structured, business-appropriate.
+2. CONVERSATIONAL — warm, natural, friendly colleague tone.
+3. CONCISE — brief, direct, respects recipient's time (1 – 3 sentences max).
 
 STRICT RULES:
-- Write as if you ARE the user — first person, their voice.
-- Do NOT invent facts, credentials, or experiences not provided.
-- Do NOT claim the user did something they did not mention.
-- Do NOT repeat the conversation back unnecessarily.
-- Do NOT use generic AI/corporate phrases like "Thank you for reaching out", \
-"I hope this message finds you well", "Sounds great!", "Absolutely!", \
-"Certainly!", "I'd be happy to".
-- Do NOT start replies with "I" as the first word if it can be avoided naturally.
-- Do NOT mention that AI generated this reply.
-- Do NOT include analysis commentary in the reply text.
-- Do NOT overuse emojis — use at most one, only if it fits the tone naturally.
-- DO respect the relationship between the two people.
-- DO respect the user's objective.
-- DO sound like a real human wrote this — authentic, not robotic.
-- DO match the existing tone of the conversation unless the user's style \
-explicitly requests otherwise.""",
+- Write as the USER (first person, their authentic voice).
+- DIRECT FOCUS: Directly address the latest message in the immediate ongoing exchange.
+- USE BACKGROUND: Use past conversation history and recalled facts for context and continuity.
+- NEVER invent facts not provided in the context below.
+- NEVER say: "Thank you for reaching out", "Hope this finds you well", \
+"Absolutely!", "Certainly!", "I'd be happy to", "Sounds great!".
+- NEVER mention memory, AI, or previous conversations explicitly.
+- NEVER start with "I" if avoidable.
+- Use at most one emoji — only if it fits naturally.
+- Sound human, not robotic or corporate.
+- PRIORITY: Immediate Ongoing Messages > Recalled Facts > Past Conversation Summary.
+- If recalled facts contradict the ongoing exchange, trust the ongoing exchange.""",
         ),
         (
             "human",
-            """Generate three reply alternatives for the following situation.
+            """CONTACT: {contact_name} — {contact_headline}
+RELATIONSHIP: {relationship}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USER PROFILE (the person replying)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Name: {user_name}
-Role: {user_role}
-Background: {user_background}
-Skills: {user_skills}
-Communication style preference: {communication_style}
+PAST CONVERSATION HISTORY (Background Context):
+{conversation_summary}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RECIPIENT PROFILE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Name: {recipient_name}
-{recipient_details}
+RECALLED FACTS ABOUT THIS CONTACT:
+{relevant_facts}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RELATIONSHIP
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{relationship}
+IMMEDIATE ONGOING EXCHANGE (Must Address the Latest Message):
+{recent_conversation}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONVERSATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{conversation_text}
+USER: {user_name} | {user_role}
+OBJECTIVE: {objective}
+PREFERRED STYLE: {style_preference}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONVERSATION ANALYSIS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Main topic: {analysis_main_topic}
-Conversation stage: {analysis_stage}
-Tone: {analysis_tone}
-Last message intent: {analysis_intent}
-Important facts: {analysis_facts}
-Open questions: {analysis_questions}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-USER OBJECTIVE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{objective}
-
-Now generate exactly three reply alternatives: professional, conversational, \
-and concise. Return structured output.""",
+Generate 3 reply alternatives (professional, conversational, concise).""",
         ),
     ]
 )

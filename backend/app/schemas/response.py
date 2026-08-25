@@ -1,84 +1,55 @@
 """
 app/schemas/response.py
 =======================
-Pydantic models for the HTTP response sent back to the Chrome extension.
-
-The response deliberately exposes only what the extension needs.
-Internal LLM output details, prompt contents, and API keys are never included.
+Pydantic response schemas for Version 2 API endpoints.
 """
 
-from typing import Literal
-
-from pydantic import BaseModel, Field
-
-from app.ai.output_models import ConversationAnalysis
+from pydantic import BaseModel, ConfigDict, Field
 
 
-# ── Reply suggestion ──────────────────────────────────────────────────────────
+def _camel(snake: str) -> str:
+    parts = snake.split("_")
+    return parts[0] + "".join(p.title() for p in parts[1:])
 
 
-class ReplySuggestionResponse(BaseModel):
-    """A single reply suggestion returned to the Chrome extension."""
-
-    style: Literal["professional", "conversational", "concise"] = Field(
-        description="The communication style of this reply."
-    )
-    text: str = Field(description="The generated reply text.")
+_alias_config = ConfigDict(
+    alias_generator=_camel,
+    populate_by_name=True,
+)
 
 
-# ── Optional analysis summary ─────────────────────────────────────────────────
+class SyncResponse(BaseModel):
+    """Response from POST /api/v1/conversations/sync."""
+    model_config = _alias_config
+    conversation_id: str
+    new_messages_count: int
+    user_id: str
+    contact_id: str
 
 
-class ConversationAnalysisSummary(BaseModel):
-    """A trimmed version of the internal ConversationAnalysis for the response.
-
-    We surface a subset of the analysis so the extension can optionally
-    display context (e.g., main topic, detected intent) without exposing
-    internal prompt engineering details.
-    """
-
-    main_topic: str
-    tone: str
-    conversation_stage: str
-    last_message_intent: str
-
-    @classmethod
-    def from_analysis(
-        cls, analysis: ConversationAnalysis
-    ) -> "ConversationAnalysisSummary":
-        return cls(
-            main_topic=analysis.main_topic,
-            tone=analysis.tone,
-            conversation_stage=analysis.conversation_stage,
-            last_message_intent=analysis.last_message_intent,
-        )
+class MemoryContextSummary(BaseModel):
+    """Memory context metadata returned with reply suggestions."""
+    model_config = _alias_config
+    summary_used: bool = Field(description="Whether conversation summary chunks were available.")
+    facts_retrieved: int = Field(description="Number of semantic facts retrieved.")
+    recent_messages_used: int = Field(description="Number of recent messages included in context.")
 
 
-# ── Top-level response ────────────────────────────────────────────────────────
+class ReplySuggestion(BaseModel):
+    """A single generated reply alternative."""
+    model_config = _alias_config
+    style: str
+    text: str
 
 
 class GenerateReplyResponse(BaseModel):
-    """Response body for POST /api/v1/reply/generate.
-
-    Includes `reply` (primary suggestion text for legacy/simple clients)
-    and `replies` array (all three suggestions: professional, conversational, concise).
-    Optionally includes `analysis` if the extension wants to display context.
-    """
-
-    reply: str = Field(
-        default="",
-        description="Primary generated reply text (convenience alias for replies[0].text).",
+    """Response from POST /api/v1/reply/generate."""
+    model_config = _alias_config
+    reply: str = Field(description="Primary reply text (first suggestion).")
+    replies: list[ReplySuggestion] = Field(
+        description="All three reply alternatives (professional, conversational, concise)."
     )
-    replies: list[ReplySuggestionResponse] = Field(
-        description="Exactly three reply suggestions: professional, conversational, concise.",
-        min_length=3,
-        max_length=3,
-    )
-    analysis: ConversationAnalysisSummary | None = Field(
+    memory_context: MemoryContextSummary | None = Field(
         default=None,
-        description=(
-            "Optional summary of the conversation analysis. "
-            "Included for transparency; the extension may display or ignore it."
-        ),
+        description="Details of memory context used — shown in the extension UI badge.",
     )
-
