@@ -4,19 +4,19 @@ A production-grade, persistent memory AI assistant for LinkedIn messaging. The s
 
 ---
 
-## 🚀 What's New in Version 2.0
+## What's New in Version 2.0
 
 - **Persistent Contact Memory & pgvector RAG**: Uses PostgreSQL with `pgvector` (768-dim embeddings via `gemini-embedding-001` with Matryoshka truncation) for semantic recall of past facts, preferences, and commitments.
 - **Deterministic Heuristic Noise Filter**: Zero-token gatekeeper that filters out trivial acknowledgments, emojis, and filler phrases without invoking the LLM.
 - **Episodic Micro-Summary Chunks**: Bounded 1–3 sentence chronological summaries (max 70 words) instead of costly full-conversation re-summarization.
-- **Automated Fact Lifecycle & Supersession**: Detects and marks outdated or contradicted facts (`ACTIVE` → `SUPERSEDED`) automatically during memory extraction.
+- **Automated Fact Lifecycle & Supersession**: Detects and marks outdated or contradicted facts (`ACTIVE` -> `SUPERSEDED`) automatically during memory extraction.
 - **Hybrid Working-Buffer & Dynamic Prompt Budgeting**: Partitions context into past summaries, recalled facts, and the immediate ongoing message buffer, keeping total LLM context strictly within ~550–650 tokens.
 - **Single-Pass RAG Reply Generation**: Streamlined from a 2-pass pipeline to a fast, single-pass generation yielding 3 distinct communication styles.
 - **Real-Time Memory Context Badging**: Chrome extension popup displays live indicators of memories retrieved, summaries used, and buffer sizes.
 
 ---
 
-## 🏗️ Architecture & Data Flow
+## Architecture & Data Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -24,7 +24,7 @@ A production-grade, persistent memory AI assistant for LinkedIn messaging. The s
 │                                                                                 │
 │   LinkedIn DOM Chat           Popup UI (React 18)       Background Worker       │
 │  ┌──────────────────┐        ┌───────────────────┐     ┌──────────────────┐     │
-│  │ Context & Convo  │───────►│Style Tabs, Prompts│────►│ Sync & Generate │     │
+│  │ Context & Convo  │───────►│Style Tabs, Prompts│────►│ Sync & Generate  │     │
 │  │ ID Extractor     │        │ & Memory Badges   │     │ Orchestrator     │     │
 │  └──────────────────┘        └───────────────────┘     └─────────┬────────┘     │
 └──────────────────────────────────────────────────────────────────┼──────────────┘
@@ -55,7 +55,7 @@ A production-grade, persistent memory AI assistant for LinkedIn messaging. The s
 
 ---
 
-## 🗄️ Database Schema (PostgreSQL + pgvector)
+## Database Schema (PostgreSQL + pgvector)
 
 Version 2 features 6 relational tables designed for strict contact-scoped memory isolation:
 
@@ -68,7 +68,7 @@ Version 2 features 6 relational tables designed for strict contact-scoped memory
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Frontend (Chrome Extension)
 - **Framework**: React 18, TypeScript, Vite
@@ -92,7 +92,7 @@ Version 2 features 6 relational tables designed for strict contact-scoped memory
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 linkedin-reply-extension/
@@ -160,7 +160,7 @@ linkedin-reply-extension/
     │   │   │   ├── composer.ts         # LinkedIn RichText editor autotyper
     │   │   │   └── selectors.ts        # Resilient LinkedIn DOM selectors
     │   │   └── ui/
-    │   │       └── replyButton.ts      # Injected '✨ Generate Reply' button
+    │   │       └── replyButton.ts      # Injected ' Generate Reply' button
     │   ├── popup/
     │   │   ├── App.tsx            # Popup container & navigation
     │   │   └── components/
@@ -174,7 +174,7 @@ linkedin-reply-extension/
 
 ---
 
-## ⚡ Quickstart Guide
+## Quickstart Guide
 
 ### 1. Prerequisites
 - **Python**: `3.12+` installed
@@ -273,7 +273,7 @@ This starts PostgreSQL 16 on port `5432` with the `pgvector` extension pre-insta
 
 ---
 
-## 📡 API Endpoints Reference
+## API Endpoints Reference
 
 ### 1. `POST /api/v1/conversations/sync`
 Synchronizes active LinkedIn messages and contact metadata. Upserts user, contact, and conversation, and batch-inserts new messages with SHA-256 hash deduplication.
@@ -376,7 +376,7 @@ Generates 3 contextual reply suggestions using contact-scoped semantic facts, re
 
 ---
 
-## 🧠 Core V2 Engineering Innovations
+## Core V2 Engineering Innovations
 
 ### 1. Deterministic Heuristic Noise Filter (0 Tokens)
 Before sending unprocessed messages to Gemini, a zero-cost heuristic gate inspects the batch. Trivial messages (e.g. *"ok"*, *"thanks!"*, *"sounds good"*, emojis, short filler) are filtered out. If an entire batch is trivial, the processing pointer advances with **0 LLM tokens consumed**.
@@ -396,7 +396,7 @@ To guarantee fast responses and prevent prompt bloat, context is strictly partit
 
 ---
 
-## 🛡️ Security & Privacy
+## Security & Privacy
 
 - **Contact Isolation**: All memory queries strictly filter by `user_id` and `contact_id` to prevent cross-contact data leakage.
 - **Sanitized Errors**: Upstream API failures and database errors are mapped to safe HTTP 502/500 codes; internal secrets and stack traces are never exposed.
