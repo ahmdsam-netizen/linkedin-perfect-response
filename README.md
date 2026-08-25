@@ -1,10 +1,18 @@
-# LinkedIn AI Reply — Version 2.0
+# LinkedIn AI Reply
 
 A production-grade, persistent memory AI assistant for LinkedIn messaging. The system consists of a **Manifest V3 Chrome Extension** (Vite + React + TypeScript) that automatically scrapes active LinkedIn conversation context and a **FastAPI + LangChain + PostgreSQL (pgvector) + Google Gemini Backend** that maintains contact-scoped long-term memory, episodic micro-summary chunks, semantic fact retrieval (RAG), and generates three tailored reply alternatives (Professional, Conversational, and Concise).
 
+## Version - 1
+
+1. **Stateless Two-Pass AI Pipeline**: Relied on a sequential 2-step LLM pipeline per request — Pass 1 analyzed conversation intent, stage, and tone, while Pass 2 generated reply variations.
+2. **DOM-Only Context Extraction**: Scraped active chat messages, recipient name, and headline directly from the LinkedIn DOM on-the-fly with no database or persistence layer.
+3. **Multi-Style Reply Alternatives**: Produced 3 tailored reply options (Professional, Conversational, and Concise) selectable via tabbed preview in the extension popup.
+4. **Synthetic DOM Composer Insertion**: Automatically injected chosen replies into LinkedIn's contenteditable rich-text editor and fired synthetic input events to enable the native "Send" button.
+5. **FastAPI & LangChain Backend**: Powered by FastAPI, Pydantic validation, and LangChain structured output chains communicating with Google Gemini.
+
 ---
 
-## What's New in Version 2.0
+## Version - 2
 
 - **Persistent Contact Memory & pgvector RAG**: Uses PostgreSQL with `pgvector` (768-dim embeddings via `gemini-embedding-001` with Matryoshka truncation) for semantic recall of past facts, preferences, and commitments.
 - **Deterministic Heuristic Noise Filter**: Zero-token gatekeeper that filters out trivial acknowledgments, emojis, and filler phrases without invoking the LLM.
