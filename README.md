@@ -24,7 +24,85 @@ A production-grade, persistent memory AI assistant for LinkedIn messaging. The s
 
 ---
 
-## Architecture & Data Flow
+## 🏗️ Architecture & Data Flow
+
+```mermaid
+flowchart TD
+    %% ─── 1. EXTENSION LAYER ───
+    subgraph EXT["Chrome Extension (Manifest V3)"]
+        direction TB
+        DOM["LinkedIn Web App<br/>(DOM Messages & Composer)"]
+        CS["Content Script<br/>(Scraper & Composer Injector)"]
+        POPUP["Popup UI (React 18)<br/>(Style Tabs, Prompts & Badges)"]
+        BG["Background Service Worker<br/>(API & State Gateway)"]
+
+        DOM <-->|Scrape Context / Insert Reply| CS
+        CS <-->|Chrome Messaging| BG
+        POPUP <-->|Trigger Actions & Display Results| BG
+    end
+
+    %% ─── 2. FASTAPI BACKEND ───
+    subgraph BACKEND["FastAPI Backend (Python 3.12)"]
+        direction TB
+        
+        subgraph SYNC_FLOW["1. Conversation Sync Pipeline"]
+            SYNC_API["POST /api/v1/conversations/sync"]
+            INGEST["Sync & Message Service<br/>(SHA-256 Hash Deduplication)"]
+            SYNC_API --> INGEST
+        end
+
+        subgraph RAG_FLOW["2. RAG Reply Generation Pipeline"]
+            REPLY_API["POST /api/v1/reply/generate"]
+            ORCHESTRATOR["Reply Service Orchestrator"]
+            
+            subgraph MEM_PIPELINE["Memory Processing (Lazy Trigger)"]
+                FILTER["Deterministic Heuristics Filter<br/>(0 Tokens for Noise/Emojis)"]
+                MEM_EXTRACT["Memory & Fact Extraction<br/>(Micro-Summary + Fact Supersession)"]
+                FILTER -->|Substantive Messages| MEM_EXTRACT
+            end
+
+            subgraph CTX_PIPELINE["Context Engineering & RAG"]
+                RETRIEVAL["pgvector Semantic Search<br/>(Top-K Contact Facts)"]
+                CHUNKS["Summary Chunk Service<br/>(Episodic Micro-Summaries)"]
+                CTX["Dynamic Context Builder<br/>(Bounded ~550–650 Tokens)"]
+                RETRIEVAL --> CTX
+                CHUNKS --> CTX
+            end
+
+            GEN_CHAIN["Single-Pass Reply Generation<br/>(3 Styles: Professional, Casual, Concise)"]
+
+            REPLY_API --> ORCHESTRATOR
+            ORCHESTRATOR --> MEM_PIPELINE
+            ORCHESTRATOR --> CTX_PIPELINE
+            CTX --> GEN_CHAIN
+        end
+    end
+
+    %% ─── 3. DATABASE & AI ───
+    subgraph DB["PostgreSQL 16 + pgvector"]
+        PG_DATA[("Relational Data<br/>• users<br/>• contacts<br/>• conversations<br/>• messages")]
+        PG_VECTOR[("Memory & Vector Data<br/>• summary_chunks<br/>• memories (VECTOR 768)")]
+    end
+
+    subgraph AI["Google Gemini AI"]
+        GEMINI_LLM["Gemini 2.5 / 3.6 Flash<br/>(Generation & Extraction)"]
+        GEMINI_EMBED["gemini-embedding-001<br/>(768-dim Embeddings)"]
+    end
+
+    %% ─── CONNECTIONS BETWEEN MAJOR BLOCKS ───
+    BG -->|1. Sync Payload| SYNC_API
+    BG -->|2. Generate Request| REPLY_API
+    GEN_CHAIN -->|3 Alternatives + Badges| BG
+
+    INGEST -->|Upsert & Store| PG_DATA
+    MEM_EXTRACT <-->|Extract Facts & Chunks| GEMINI_LLM
+    MEM_EXTRACT <-->|Generate Embeddings| GEMINI_EMBED
+    MEM_EXTRACT -->|Store Chunks & Embeddings| PG_VECTOR
+
+    PG_VECTOR -->|Read Chunks & Cosine Search| CTX_PIPELINE
+    PG_DATA -->|Read Recent Message Buffer| CTX_PIPELINE
+    GEN_CHAIN <-->|Generate 3 Variations| GEMINI_LLM
+```
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
