@@ -6,7 +6,6 @@ FastAPI application factory with database lifespan initializer and V2 routers.
 
 import logging
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,6 +23,15 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+# logger is similar to print() -- but it is much better in real life application such as 
+'''
+Control which messages appear
+Save logs to files
+Include timestamps
+Include error information
+Send logs to monitoring systems
+Disable debug logs in production
+'''
 
 settings = get_settings()
 

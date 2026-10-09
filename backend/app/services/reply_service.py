@@ -14,6 +14,8 @@ Pipeline (8 steps):
   8. Single LangChain call → 3 styled replies
 """
 
+from __future__ import annotations
+
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +32,6 @@ from app.services import (
 )
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 async def generate_reply(
@@ -91,7 +92,7 @@ async def generate_reply(
     recent_messages = await message_service.get_recent_messages(
         db,
         conversation_id=conversation_id,
-        limit=settings.recent_messages_count,
+        limit=get_settings().recent_messages_count,
     )
 
     # 4. Dynamic Prompt Budgeting:

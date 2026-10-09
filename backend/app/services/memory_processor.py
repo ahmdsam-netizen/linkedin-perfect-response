@@ -15,6 +15,8 @@ call the LLM for memory extraction. All callers (reply_service) simply
 call process_if_needed() and let this module decide.
 """
 
+from __future__ import annotations
+
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +34,6 @@ from app.services import (
 )
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 def _format_messages_for_llm(messages: list[Message], user_name: str, contact_name: str) -> str:
@@ -89,7 +90,7 @@ async def process_if_needed(
 
     # 2. Check threshold
     count = len(unprocessed)
-    threshold = settings.memory_process_threshold
+    threshold = get_settings().memory_process_threshold
     if not force and count < threshold:
         logger.debug(
             "Skipping memory processing: %d unprocessed < threshold %d.", count, threshold

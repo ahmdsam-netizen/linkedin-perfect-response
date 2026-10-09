@@ -15,8 +15,11 @@ Tables:
   6. memories        — Contact-scoped vector facts (pgvector VECTOR(768))
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -90,7 +93,7 @@ class Contact(Base):
     )
     linkedin_profile_id: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    headline: Mapped[str | None] = mapped_column(Text, nullable=True)
+    headline: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -129,7 +132,7 @@ class Conversation(Base):
         UUID(as_uuid=False), ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False
     )
     linkedin_conversation_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    last_processed_message_id: Mapped[str | None] = mapped_column(
+    last_processed_message_id: Mapped[Optional[str]] = mapped_column(
         UUID(as_uuid=False), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -241,7 +244,7 @@ class Memory(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     memory_type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(768), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

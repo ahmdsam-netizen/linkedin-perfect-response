@@ -13,6 +13,8 @@ load only the 10–50 facts for this contact into memory, then performs
 exact cosine distance ranking in sub-millisecond time.
 """
 
+from __future__ import annotations
+
 import logging
 
 from sqlalchemy import text
@@ -22,8 +24,6 @@ from app.core.config import get_settings
 from app.services.embedding_service import embed_query
 
 logger = logging.getLogger(__name__)
-
-settings = get_settings()
 
 
 async def semantic_search(
@@ -49,8 +49,9 @@ async def semantic_search(
         List of dicts: [{"id": str, "content": str, "memory_type": str, "similarity": float}]
         Returns empty list on any error (graceful degradation).
     """
-    k = top_k or settings.retrieval_top_k
-    t = threshold if threshold is not None else settings.retrieval_threshold
+    cfg = get_settings()
+    k = top_k or cfg.retrieval_top_k
+    t = threshold if threshold is not None else cfg.retrieval_threshold
 
     try:
         query_vector = await embed_query(query)

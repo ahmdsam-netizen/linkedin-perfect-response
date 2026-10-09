@@ -4,6 +4,10 @@ app/schemas/response.py
 Pydantic response schemas for Version 2 API endpoints.
 """
 
+from __future__ import annotations
+
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -49,7 +53,7 @@ class GenerateReplyResponse(BaseModel):
     replies: list[ReplySuggestion] = Field(
         description="All three reply alternatives (professional, conversational, concise)."
     )
-    memory_context: MemoryContextSummary | None = Field(
+    memory_context: Optional[MemoryContextSummary] = Field(
         default=None,
         description="Details of memory context used — shown in the extension UI badge.",
     )

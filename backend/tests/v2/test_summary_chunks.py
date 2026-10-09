@@ -1,7 +1,7 @@
 """
 tests/v2/test_summary_chunks.py
 ===============================
-Tests for episodic micro-summary chunk querying and appending.
+Tests for episodic micro-summary chunk querying, appending, and rolling 3-chunk retention.
 """
 
 import pytest
@@ -28,3 +28,24 @@ async def test_get_latest_chunks_ordering():
     assert len(chunks) == 2
     assert chunks[0].chunk_index == 0
     assert chunks[1].chunk_index == 1
+
+
+@pytest.mark.asyncio
+async def test_prune_old_chunks_rolling_window():
+    """Verify that prune_old_chunks deletes chunks beyond the rolling limit of 3."""
+    mock_db = AsyncMock()
+
+    # Suppose there are 5 chunks in DB: id-5, id-4, id-3, id-2, id-1
+    mock_result_select = MagicMock()
+    mock_result_select.scalars.return_value.all.return_value = ["id-5", "id-4", "id-3", "id-2", "id-1"]
+
+    mock_result_delete = MagicMock()
+    mock_result_delete.rowcount = 2
+
+    mock_db.execute.side_effect = [mock_result_select, mock_result_delete]
+
+    deleted = await summary_chunk_service.prune_old_chunks(mock_db, conversation_id="conv-1", keep_last=3)
+
+    # Should prune 2 oldest chunks (id-2 and id-1), keeping latest 3 (id-5, id-4, id-3)
+    assert deleted == 2
+    assert mock_db.execute.call_count == 2

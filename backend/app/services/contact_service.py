@@ -4,6 +4,8 @@ app/services/contact_service.py
 Find-or-create a Contact record scoped to a specific user.
 """
 
+from __future__ import annotations
+
 import logging
 
 from sqlalchemy import select

@@ -4,6 +4,8 @@ app/services/conversation_service.py
 Find-or-create a Conversation and update its processing pointer.
 """
 
+from __future__ import annotations
+
 import logging
 
 from sqlalchemy import select

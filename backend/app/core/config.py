@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # ── Gemini ────────────────────────────────────────────────────────────────
     gemini_api_key: str = Field(..., description="Gemini API key (required)")
     gemini_model: str = Field(
-        default="gemini-2.5-flash",
+        default="gemini-3.6-flash",
         description="Gemini model for reply generation and memory extraction.",
     )
     gemini_embedding_model: str = Field(

@@ -38,7 +38,7 @@ _TRIVIAL_PHRASES: frozenset[str] = frozenset({
     # Greetings (without context)
     "hi", "hey", "hello", "sup", "yo",
     # Simple confirmations with punctuation stripped
-    "ok!", "okay!", "great!", "perfect!", "sure!", "noted!",
+    "ok!", "okay!", "great!", "perfect!", "sure!", "noted!", "enjoy!",
     "yes!", "no!", "cool!", "awesome!",
     # Short responses
     "hmm", "hm", "ah", "oh", "ah ok", "oh ok", "i see",

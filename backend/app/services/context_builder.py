@@ -12,6 +12,8 @@ Partitions context into:
 Target budget: ~550–650 tokens total.
 """
 
+from __future__ import annotations
+
 import logging
 
 from app.db.models import Message, SummaryChunk

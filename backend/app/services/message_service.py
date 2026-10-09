@@ -7,6 +7,8 @@ Uses INSERT ... ON CONFLICT DO NOTHING so an entire conversation sync
 is handled in a single SQL statement — no N+1 queries.
 """
 
+from __future__ import annotations
+
 import hashlib
 import logging
 from dataclasses import dataclass

@@ -4,7 +4,9 @@ app/schemas/request.py
 Pydantic request schemas for Version 2 API endpoints.
 """
 
-from typing import Literal
+from __future__ import annotations
+
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,7 +36,7 @@ class SyncContactIn(BaseModel):
     model_config = _alias_config
     linkedin_profile_id: str = Field(description="LinkedIn profile identifier of the contact.")
     name: str = Field(description="Display name of the contact.")
-    headline: str | None = Field(default=None, description="Contact's LinkedIn headline.")
+    headline: Optional[str] = Field(default=None, description="Contact's LinkedIn headline.")
 
 
 class SyncConversationIn(BaseModel):
@@ -72,13 +74,13 @@ class GenerateReplyRequest(BaseModel):
     user_name: str = Field(default="LinkedIn User", description="Name of the replying user.")
     user_role: str = Field(default="", description="Role/title of the replying user.")
     contact_name: str = Field(default="", description="Display name of the contact.")
-    contact_headline: str | None = Field(default=None, description="Contact's LinkedIn headline.")
-    relationship: str | None = Field(default=None, description="Relationship description.")
-    instruction: str | None = Field(
+    contact_headline: Optional[str] = Field(default=None, description="Contact's LinkedIn headline.")
+    relationship: Optional[str] = Field(default=None, description="Relationship description.")
+    instruction: Optional[str] = Field(
         default=None,
         description="User's objective or custom prompt goal.",
     )
-    tone: str | None = Field(
+    tone: Optional[str] = Field(
         default=None,
         description="Preferred tone: 'professional', 'casual', 'concise', etc.",
     )
